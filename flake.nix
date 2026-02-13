@@ -2,6 +2,10 @@
   inputs = {
     nixpkgs-2511.url = "github:NixOS/nixpkgs/nixos-25.11";
     nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
+    serena = {
+      url = "github:oraios/serena/main";
+      inputs.nixpkgs.follows = "nixpkgs-unstable";
+    };
   };
 
   outputs = inputs: {
@@ -14,6 +18,7 @@
       in {
         opencode-bwrap = callPackage ./opencode-bwrap {
           inherit (inputs) nixpkgs-unstable;
+          serena = inputs.serena.packages.${system}.default;
         };
       });
   };

@@ -2,6 +2,7 @@
   pkgs,
   lib,
   nixpkgs-unstable,
+  serena,
 }: let
   unsafe = nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system}.opencode;
 
@@ -161,7 +162,10 @@
         --ro-bind ${bashrc} /etc/bashrc
         --ro-bind "${pkgs.nix-direnv}/share/nix-direnv/direnvrc" "$HOME"/.config/direnv/lib/nix-direnv.sh
         --setenv HOME "$HOME"
-        --setenv PATH ${unsafe}/bin:/etc/profiles/per-user/"$USER"/bin:/run/current-system/sw/bin
+        --setenv PATH ${lib.makeBinPath [
+        unsafe
+        serena
+      ]}:/etc/profiles/per-user/"$USER"/bin:/run/current-system/sw/bin
         --setenv USER "$USER"
         --setenv TERM "$TERM"
         --setenv TERMINFO_DIRS /etc/profiles/per-user/"$USER"/share/terminfo:/run/current-system/sw/share/terminfo
