@@ -38,9 +38,15 @@
 
     PS1=$"\n"'\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
 
+    stty -ixon       # turn off C-s and C-q
+    stty susp undef  # turn off C-z
+
     shopt -s histappend
-    export HISTCONTROL=ignoredups
+    export HISTCONTROL=ignoredups:ignorespace
     PROMPT_COMMAND='history -a; history -n'
+
+    bind '"\e[A": history-search-backward'
+    bind '"\e[B": history-search-forward'
 
     eval "$(${lib.getExe pkgs.direnv} hook bash)"
   '';
