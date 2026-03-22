@@ -11,26 +11,55 @@
     };
   };
 
-  outputs = inputs: {
+  outputs = inputs: let
+    inherit (inputs.nixpkgs) lib;
+
+    # Minimal stubs for the home-manager options our module sets.
+    # This lets us evaluate the module with lib.evalModules so that
+    # `nix build` exercises the same code path as a real HM configuration.
+    hmOptionStubs = {
+      options = {
+        home.packages = lib.mkOption {
+          type = lib.types.listOf lib.types.package;
+          default = [];
+        };
+        systemd.user = lib.mkOption {
+          type = lib.types.anything;
+          default = {};
+        };
+        assertions = lib.mkOption {
+          type = lib.types.listOf lib.types.anything;
+          default = [];
+        };
+      };
+    };
+  in {
     homeManagerModules.default = import ./hm-module.nix {inherit inputs;};
 
     packages =
-      inputs.nixpkgs.lib.genAttrs [
+      lib.genAttrs [
         "x86_64-linux"
         "aarch64-linux"
       ] (system: let
-        inherit (inputs.nixpkgs.legacyPackages.${system}) callPackage;
-        bun2nix = inputs.bun2nix.packages.${system}.default;
-        serena = inputs.serena.packages.${system}.default;
-        plugins = callPackage ./plugins {inherit bun2nix;};
-        escapeHatch = callPackage ./bwrap-escape-hatch {};
+        pkgs = inputs.nixpkgs.legacyPackages.${system};
+
+        hmEval = lib.evalModules {
+          specialArgs = {inherit pkgs;};
+          modules = [
+            (import ./hm-module.nix {inherit inputs;})
+            hmOptionStubs
+            {
+              programs.opencode-bwrap = {
+                enable = true;
+                notifications.enable = true;
+              };
+            }
+          ];
+        };
       in rec {
         default = opencode-bwrap;
-        opencode-bwrap = callPackage ./opencode-bwrap {
-          inherit bun2nix serena plugins;
-          bwrap-escape-hatch = escapeHatch;
-        };
-        bwrap-escape-hatch = escapeHatch.package;
+        opencode-bwrap = builtins.head hmEval.config.home.packages;
+        bwrap-escape-hatch = (pkgs.callPackage ./bwrap-escape-hatch {}).package;
       });
   };
 }
