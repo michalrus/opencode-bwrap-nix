@@ -105,7 +105,11 @@
   # -- Main package --------------------------------------------------------
 
   package = pkgs.callPackage ./opencode-bwrap {
-    inherit bun2nix serena plugins notifierConfig;
+    inherit bun2nix plugins notifierConfig;
+    serena =
+      if cfg.serena.enable
+      then serena
+      else null;
     bwrap-escape-hatch = escapeHatch;
     preamblePath = cfg.preamble;
     bashrcSource = cfg.bashrc;
@@ -182,6 +186,12 @@ in {
       default = [];
       example = ["ANTHROPIC_API_KEY" "GITHUB_TOKEN"];
       description = "Host environment variable names to forward into the sandbox (only set when non-empty on the host).";
+    };
+
+    serena = {
+      enable =
+        mkEnableOption "Serena LSP/MCP integration (provides semantic code-navigation tools)"
+        // {default = true;};
     };
 
     notifications = {

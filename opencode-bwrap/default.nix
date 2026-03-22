@@ -2,7 +2,7 @@
   pkgs,
   lib,
   bun2nix,
-  serena,
+  serena ? null,
   plugins,
   bwrap-escape-hatch,
   # Overridable by the home-manager module:
@@ -95,7 +95,7 @@
     tui = {
       diff_style = "stacked";
     };
-    mcp = {
+    mcp = lib.optionalAttrs (serena != null) {
       serena = {
         type = "local";
         command = ["serena" "start-mcp-server"];
@@ -111,7 +111,10 @@
     # Set at top level so all agents (build, plan, custom) inherit them.
     permission = {
       "*" = "allow";
-      lsp = "deny"; # we have a better serena for this
+      lsp =
+        if serena != null
+        then "deny" # we have a better serena for this
+        else "allow";
       doom_loop = "deny";
     };
   };
@@ -218,7 +221,9 @@
         --setenv HOME "$HOME"
         --setenv PATH ${lib.makeBinPath ([
           unsafe
-          serena
+        ]
+        ++ lib.optional (serena != null) serena
+        ++ [
           escapeHatchShims
         ]
         ++ extraPackages)}:/etc/profiles/per-user/"$USER"/bin:/run/current-system/sw/bin:"$HOME"/.bin

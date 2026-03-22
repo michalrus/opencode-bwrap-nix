@@ -15,8 +15,9 @@ with a Home Manager module for declarative installation.
 - Provides a socket-activated **escape hatch** for operations that must run
   on the host (desktop notifications, sound playback), gated by an
   fnmatch allow-list. See [`bwrap-escape-hatch/README.md`](bwrap-escape-hatch/README.md).
-- Integrates [Serena](https://github.com/oraios/serena) as an MCP server
-  for LSP-powered code navigation inside the sandbox.
+- Optionally integrates [Serena](https://github.com/oraios/serena) as an
+  MCP server for LSP-powered code navigation inside the sandbox (enabled
+  by default).
 - Supports [direnv](https://direnv.net/) + nix-direnv for per-project Nix
   dev shells.
 
@@ -57,18 +58,19 @@ directories mounted read-write. Run `opencode` (aliased `oc`) from there.
 
 ## Home Manager options
 
-| Option                     | Type             | Description                                            |
-| -------------------------- | ---------------- | ------------------------------------------------------ |
-| `enable`                   | bool             | Enable the sandbox wrapper                             |
-| `preamble`                 | path             | Instructions file mounted into the sandbox             |
-| `bashrc` / `zshrc`         | path             | Shell configs sourced inside the sandbox               |
-| `extraPackages`            | list of packages | Additional packages on the sandbox PATH                |
-| `extraEnv`                 | attrs of strings | Static env vars set in the sandbox                     |
-| `extraFwdEnv`              | list of strings  | Host env vars forwarded into the sandbox               |
-| `notifications.enable`     | bool             | Desktop notifications + sounds via escape hatch        |
-| `notifications.sounds.*`   | path or null     | Per-event sound files (converted to WAV at build time) |
-| `notifications.messages.*` | string           | Per-event notification body templates                  |
-| `notifications.extraRules` | list of rules    | Additional escape-hatch allow-list entries             |
+| Option                     | Type             | Description                                                |
+| -------------------------- | ---------------- | ---------------------------------------------------------- |
+| `enable`                   | bool             | Enable the sandbox wrapper                                 |
+| `preamble`                 | path             | Instructions file mounted into the sandbox                 |
+| `bashrc` / `zshrc`         | path             | Shell configs sourced inside the sandbox                   |
+| `extraPackages`            | list of packages | Additional packages on the sandbox PATH                    |
+| `extraEnv`                 | attrs of strings | Static env vars set in the sandbox                         |
+| `extraFwdEnv`              | list of strings  | Host env vars forwarded into the sandbox                   |
+| `serena.enable`            | bool             | Serena MCP integration for code navigation (default: true) |
+| `notifications.enable`     | bool             | Desktop notifications + sounds via escape hatch            |
+| `notifications.sounds.*`   | path or null     | Per-event sound files (converted to WAV at build time)     |
+| `notifications.messages.*` | string           | Per-event notification body templates                      |
+| `notifications.extraRules` | list of rules    | Additional escape-hatch allow-list entries                 |
 
 ## Building from source
 
