@@ -19,6 +19,9 @@
           inherit (inputs) nixpkgs-unstable;
           home-manager = inputs.home-manager-2511;
         };
+        opencode-bwrap = callPackage ./opencode-bwrap {
+          inherit (inputs) nixpkgs-unstable;
+        };
       });
   };
 }
