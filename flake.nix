@@ -12,6 +12,8 @@
   };
 
   outputs = inputs: {
+    homeManagerModules.default = import ./hm-module.nix {inherit inputs;};
+
     packages =
       inputs.nixpkgs.lib.genAttrs [
         "x86_64-linux"
@@ -21,7 +23,7 @@
         bun2nix = inputs.bun2nix.packages.${system}.default;
         serena = inputs.serena.packages.${system}.default;
         plugins = callPackage ./plugins {inherit bun2nix;};
-        escapeHatch = callPackage ./bwrap-escape-hatch {inherit plugins;};
+        escapeHatch = callPackage ./bwrap-escape-hatch {};
       in rec {
         default = opencode-bwrap;
         opencode-bwrap = callPackage ./opencode-bwrap {

@@ -5,6 +5,14 @@
   serena,
   plugins,
   bwrap-escape-hatch,
+  # Overridable by the home-manager module:
+  preamblePath ? ./preamble.md,
+  bashrcSource ? ./bashrc,
+  zshrcSource ? ./zshrc,
+  extraPackages ? [],
+  extraEnv ? {},
+  extraFwdEnv ? [],
+  notifierConfig ? plugins.opencode-notifier-config,
 }: let
   # opencode 1.2.27 from nixos-unstable:
   unsafe-src = pkgs.fetchurl {
@@ -98,13 +106,7 @@
     experimental = {
       disable_paste_summary = true;
     };
-    instructions = [
-      "${builtins.path {
-        path = ./.;
-        name = "preamble";
-        filter = path: _: baseNameOf path == "preamble.md";
-      }}/preamble.md"
-    ];
+    instructions = ["${preamblePath}"];
     # We're running in a strict sandbox, so let's relax the default permissions.
     # Set at top level so all agents (build, plan, custom) inherit them.
     permission = {
@@ -114,15 +116,15 @@
     };
   };
 
-  inherit (plugins) opencode-plugins opencode-notifier-config;
+  inherit (plugins) opencode-plugins;
 
   bashrc = pkgs.writeText "opencode-bashrc" ''
-    ${builtins.readFile ./bashrc}
+    ${builtins.readFile bashrcSource}
     eval "$(${lib.getExe pkgs.direnv} hook bash)"
   '';
 
   zshrc = pkgs.writeText "opencode-zshrc" ''
-    ${builtins.readFile ./zshrc}
+    ${builtins.readFile zshrcSource}
     eval "$(${lib.getExe pkgs.direnv} hook zsh)"
   '';
 
@@ -214,11 +216,12 @@
         --ro-bind "${pkgs.nix-direnv}/share/nix-direnv/direnvrc" "$HOME"/.config/direnv/lib/nix-direnv.sh
         --setenv SHELL "$shell_exe"
         --setenv HOME "$HOME"
-        --setenv PATH ${lib.makeBinPath [
-        unsafe
-        serena
-        escapeHatchShims
-      ]}:/etc/profiles/per-user/"$USER"/bin:/run/current-system/sw/bin:"$HOME"/.bin
+        --setenv PATH ${lib.makeBinPath ([
+          unsafe
+          serena
+          escapeHatchShims
+        ]
+        ++ extraPackages)}:/etc/profiles/per-user/"$USER"/bin:/run/current-system/sw/bin:"$HOME"/.bin
         --setenv USER "$USER"
         --setenv TERM "$TERM"
         --setenv TERMINFO_DIRS /etc/profiles/per-user/"$USER"/share/terminfo:/run/current-system/sw/share/terminfo
@@ -257,11 +260,25 @@
         bwrap_opts+=( --ro-bind "$HOME"/.config/git/ignore "$HOME"/.config/git/ignore )
       fi
 
+      ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: value: ''
+          bwrap_opts+=( --setenv ${lib.escapeShellArg name} ${lib.escapeShellArg value} )
+        '')
+        extraEnv)}
+
+      ${lib.optionalString (extraFwdEnv != []) ''
+        # Forward host environment variables into the sandbox
+        for _var in ${lib.concatMapStringsSep " " lib.escapeShellArg extraFwdEnv}; do
+          if [ -n "''${!_var+x}" ]; then
+            bwrap_opts+=( --setenv "$_var" "''${!_var}" )
+          fi
+        done
+      ''}
+
       # OpenCode plugins (pinned via fetchFromGitHub, mounted read-only)
       bwrap_opts+=( --ro-bind ${opencode-plugins} "$HOME"/.config/opencode/plugins )
 
       # opencode-notifier config
-      bwrap_opts+=( --ro-bind ${pkgs.writeText "opencode-notifier.json" (builtins.toJSON opencode-notifier-config)} "$HOME"/.config/opencode/opencode-notifier.json )
+      bwrap_opts+=( --ro-bind ${pkgs.writeText "opencode-notifier.json" (builtins.toJSON notifierConfig)} "$HOME"/.config/opencode/opencode-notifier.json )
 
       # OpenCode config
       bwrap_opts+=( --ro-bind ${pkgs.writeText "config.json" (builtins.toJSON config)} "$HOME"/.config/opencode/config.json )
