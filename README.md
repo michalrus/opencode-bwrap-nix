@@ -9,7 +9,7 @@ with a Home Manager module for declarative installation.
 - Isolates the AI coding agent with `--unshare-all` (PID, net, mount, etc.)
   and a clean environment.
 - Mounts `.git` directories **read-only** so the agent cannot rewrite
-  history (override with `OPENCODE_UNSAFE_RW_GIT`).
+  history (override with `OPENCODE_UNSAFE_RW_GIT=1`).
 - Applies a seccomp-BPF filter that blocks the `TIOCSTI` ioctl, preventing
   keystroke injection into the host terminal.
 - Provides a socket-activated **escape hatch** for operations that must run
@@ -75,9 +75,7 @@ directories mounted read-write. Run `opencode` (aliased `oc`) from there.
 ## Building from source
 
 ```
-nix build .#opencode-bwrap      # main sandboxed wrapper
-nix build .#bwrap-escape-hatch  # escape-hatch service only
-nix build                       # default = opencode-bwrap
+nix build -L .#opencode-bwrap      # main sandboxed wrapper
 ```
 
 Supported systems: `x86_64-linux`, `aarch64-linux`.
