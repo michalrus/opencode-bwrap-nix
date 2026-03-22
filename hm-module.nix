@@ -195,7 +195,11 @@ in {
     };
 
     notifications = {
-      enable = mkEnableOption "desktop notifications and sounds via the escape-hatch service";
+      enable =
+        mkEnableOption "desktop notifications and sounds via the escape-hatch service"
+        // {
+          default = true;
+        };
 
       sounds = {
         permission = mkSoundOption "permission" "${defaultSoundRepo}/m4r/Illuminate.m4r";

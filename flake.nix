@@ -51,7 +51,6 @@
             {
               programs.opencode-bwrap = {
                 enable = true;
-                notifications.enable = true;
               };
             }
           ];
