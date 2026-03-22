@@ -28,7 +28,7 @@ Add the flake to your Home Manager configuration:
 ```nix
 # flake.nix
 {
-  inputs.opencode-bwrap.url = "github:anthropic/opencod3-bwrap-nix";
+  inputs.opencode-bwrap.url = "github:michalrus/opencode-bwrap-nix";
 
   outputs = { self, home-manager, opencode-bwrap, ... }: {
     homeConfigurations."you" = home-manager.lib.homeManagerConfiguration {
