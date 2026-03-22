@@ -19,7 +19,8 @@
         "aarch64-linux"
       ] (system: let
         inherit (inputs.nixpkgs-2511.legacyPackages.${system}) callPackage;
-      in {
+      in rec {
+        default = opencode-bwrap;
         opencode-bwrap = callPackage ./opencode-bwrap {
           inherit (inputs) nixpkgs-unstable;
           bun2nix = inputs.bun2nix.packages.${system}.default;
