@@ -1,11 +1,16 @@
 {
   pkgs,
   lib,
-  nixpkgs-unstable,
   bun2nix,
   serena,
 }: let
-  unsafe = nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system}.opencode.overrideAttrs (prev: {
+  # opencode 1.2.27 from nixos-unstable:
+  unsafe-src = pkgs.fetchurl {
+    url = "https://github.com/NixOS/nixpkgs/raw/f956974d2fc94684bb3118e2e0b4b12a0d58aac3/pkgs/by-name/op/opencode/package.nix";
+    hash = "sha256-q2hYaYpwCIpQfulhBegy8IhwlzkSPT2HNnkpXUhVpJU=";
+  };
+
+  unsafe = (pkgs.callPackage unsafe-src {}).overrideAttrs (prev: {
     patches =
       (prev.patches or [])
       ++ [
