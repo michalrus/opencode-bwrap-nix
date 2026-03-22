@@ -18,13 +18,17 @@
         "aarch64-linux"
       ] (system: let
         inherit (inputs.nixpkgs.legacyPackages.${system}) callPackage;
+        bun2nix = inputs.bun2nix.packages.${system}.default;
+        serena = inputs.serena.packages.${system}.default;
+        plugins = callPackage ./plugins {inherit bun2nix;};
+        escapeHatch = callPackage ./bwrap-escape-hatch {inherit plugins;};
       in rec {
         default = opencode-bwrap;
         opencode-bwrap = callPackage ./opencode-bwrap {
-          #inherit (inputs) nixpkgs-unstable;
-          bun2nix = inputs.bun2nix.packages.${system}.default;
-          serena = inputs.serena.packages.${system}.default;
+          inherit bun2nix serena plugins;
+          bwrap-escape-hatch = escapeHatch;
         };
+        bwrap-escape-hatch = escapeHatch.package;
       });
   };
 }

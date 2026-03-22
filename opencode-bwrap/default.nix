@@ -3,6 +3,8 @@
   lib,
   bun2nix,
   serena,
+  plugins,
+  bwrap-escape-hatch,
 }: let
   # opencode 1.2.27 from nixos-unstable:
   unsafe-src = pkgs.fetchurl {
@@ -19,8 +21,7 @@
       ];
   });
 
-  escapeHatch = pkgs.callPackage ./bwrap-escape-hatch {inherit plugins;};
-  escapeHatchShims = escapeHatch.mkGuestWrappers [
+  escapeHatchShims = bwrap-escape-hatch.mkGuestWrappers [
     {
       name = "notify-send";
       hostBin = "${pkgs.libnotify}/bin/notify-send";
@@ -113,7 +114,6 @@
     };
   };
 
-  plugins = import ./plugins.nix {inherit pkgs lib bun2nix;};
   inherit (plugins) opencode-plugins opencode-notifier-config;
 
   bashrc = pkgs.writeText "opencode-bashrc" ''
@@ -313,7 +313,7 @@
     derivationArgs = {
       meta.description = "Enters a (multi-)project sandbox to run `opencode` inside; `.git` entries are mounted read-only unless OPENCODE_UNSAFE_RW_GIT is set.";
       meta.platforms = lib.platforms.linux;
-      passthru.bwrap-escape-hatch = escapeHatch // {inherit escapeHatchShims;};
+      passthru.bwrap-escape-hatch = bwrap-escape-hatch // {inherit escapeHatchShims;};
       passthru.plugins = plugins;
     };
   };
