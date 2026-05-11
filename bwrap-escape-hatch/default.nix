@@ -32,7 +32,7 @@
           inherit name;
           runtimeInputs = [pkgs.socat pkgs.jq];
           text = ''
-            resp=$(socat - \
+            resp=$(socat -t 30 - \
               UNIX-CONNECT:"$XDG_RUNTIME_DIR/bwrap-escape-hatch.sock" \
               <<< "$(jq -cn '$ARGS.positional' --args -- ${lib.escapeShellArg hostBin} "$@")")
             last_line=$(printf '%s\n' "$resp" | tail -1)
@@ -41,7 +41,7 @@
               echo "${name}: $error" >&2
             fi
             exit_code=$(printf '%s' "$last_line" | jq -r '.exit_code // 1')
-            exit "$exit_code"
+            exit "''${exit_code:-1}"
           '';
         })
       specs;
