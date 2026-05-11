@@ -47,100 +47,109 @@
 
   configFormat = pkgs.formats.json {};
 
-  evalConfig = modules: (lib.evalModules {
-    modules = [{
-      options.conf = lib.mkOption {
-        type = lib.types.submodule {
-          freeformType = configFormat.type;
+  evalConfig = modules:
+    (lib.evalModules {
+      modules = [
+        {
+          options.conf = lib.mkOption {
+            type = lib.types.submodule {
+              freeformType = configFormat.type;
+            };
+          };
+
+          config.conf = lib.mkMerge modules;
+        }
+      ];
+    }).config.conf;
+
+  config = evalConfig [
+    extraConfig
+    {
+      "$schema" = "https://opencode.ai/config.json";
+      compaction = compactionConfig;
+      share = "disabled";
+      lsp = false;
+      formatter = lib.optionalAttrs treefmtEnabled {
+        biome.disabled = true;
+        cargofmt.disabled = true;
+        oxfmt.disabled = true;
+        ruff.disabled = true;
+        rubocop.disabled = true;
+        rustfmt.disabled = true;
+        shfmt.disabled = true;
+        standardrb.disabled = true;
+        uv.disabled = true;
+        nixfmt.disabled = true;
+        prettier.disabled = true;
+        gofmt.disable = true;
+        treefmt = {
+          command = ["treefmt" "$FILE"];
+          extensions = [
+            ".bash"
+            ".cjs"
+            ".css"
+            ".envrc"
+            ".envrc.*"
+            ".go"
+            ".html"
+            ".js"
+            ".json"
+            ".json5"
+            ".jsonc"
+            ".jsx"
+            ".md"
+            ".mdx"
+            ".mjs"
+            ".nix"
+            ".py"
+            ".pyi"
+            ".rb"
+            ".rs"
+            ".scss"
+            ".sh"
+            ".toml"
+            ".ts"
+            ".tsx"
+            ".vue"
+            ".yaml"
+            ".yml"
+          ];
         };
       };
-
-      config.conf = lib.mkMerge modules;
-    }];
-  }).config.conf;
-
-  config = evalConfig [extraConfig {
-    "$schema" = "https://opencode.ai/config.json";
-    compaction = compactionConfig;
-    share = "disabled";
-    lsp = false;
-    formatter = lib.optionalAttrs treefmtEnabled {
-      biome.disabled = true;
-      cargofmt.disabled = true;
-      oxfmt.disabled = true;
-      ruff.disabled = true;
-      rubocop.disabled = true;
-      rustfmt.disabled = true;
-      shfmt.disabled = true;
-      standardrb.disabled = true;
-      uv.disabled = true;
-      nixfmt.disabled = true;
-      prettier.disabled = true;
-      gofmt.disable = true;
-      treefmt = {
-        command = ["treefmt" "$FILE"];
-        extensions = [
-          ".bash"
-          ".cjs"
-          ".css"
-          ".envrc"
-          ".envrc.*"
-          ".go"
-          ".html"
-          ".js"
-          ".json"
-          ".json5"
-          ".jsonc"
-          ".jsx"
-          ".md"
-          ".mdx"
-          ".mjs"
-          ".nix"
-          ".py"
-          ".pyi"
-          ".rb"
-          ".rs"
-          ".scss"
-          ".sh"
-          ".toml"
-          ".ts"
-          ".tsx"
-          ".vue"
-          ".yaml"
-          ".yml"
-        ];
+      mcp = lib.optionalAttrs (serena != null) {
+        serena = {
+          type = "local";
+          command = ["serena" "start-mcp-server"];
+          enabled = true;
+        };
       };
-    };
-    mcp = lib.optionalAttrs (serena != null) {
-      serena = {
-        type = "local";
-        command = ["serena" "start-mcp-server"];
-        enabled = true;
+      autoupdate = false;
+      provider = providerJSON;
+      experimental = {
+        disable_paste_summary = true;
       };
-    };
-    autoupdate = false;
-    provider = providerJSON;
-    experimental = {
-      disable_paste_summary = true;
-    };
-    instructions = ["${preamblePath}"];
-    # We're running in a strict sandbox, so let's relax the default permissions.
-    # Set at top level so all agents (build, plan, custom) inherit them.
-    permission = {
-      "*" = "allow";
-      lsp =
-        if serena != null
-        then "deny" # we have a better serena for this
-        else "allow";
-      doom_loop = "deny";
-    };
-  }];
+      instructions = ["${preamblePath}"];
+      # We're running in a strict sandbox, so let's relax the default permissions.
+      # Set at top level so all agents (build, plan, custom) inherit them.
+      permission = {
+        "*" = "allow";
+        lsp =
+          if serena != null
+          then "deny" # we have a better serena for this
+          else "allow";
+        doom_loop = "deny";
+      };
+    }
+  ];
 
-  tuiConfig = evalConfig [extraTuiConfig {
-    "$schema" = "https://opencode.ai/tui.json";
-    diff_style = "stacked";
-    theme = "solarized";
-  }];
+  tuiConfig = evalConfig [
+    extraTuiConfig
+    {
+      "$schema" = "https://opencode.ai/tui.json";
+      diff_style = "stacked";
+      theme = "solarized";
+    }
+  ];
 
   # Runs inside the sandbox before the interactive shell.
   sandboxInit = pkgs.writeShellScript "sandbox-init" ''
