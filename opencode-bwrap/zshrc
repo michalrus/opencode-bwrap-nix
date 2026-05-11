@@ -43,6 +43,12 @@ bindkey "\e[B" history-beginning-search-forward
 [[ -n "${terminfo[kcuu1]}" ]] && bindkey "${terminfo[kcuu1]}" history-beginning-search-backward
 [[ -n "${terminfo[kcud1]}" ]] && bindkey "${terminfo[kcud1]}" history-beginning-search-forward
 
+# Home/End move to beginning/end of line.
+bindkey "\e[H" beginning-of-line
+bindkey "\e[F" end-of-line
+[[ -n "${terminfo[khome]}" ]] && bindkey "${terminfo[khome]}" beginning-of-line
+[[ -n "${terminfo[kend]}" ]] && bindkey "${terminfo[kend]}" end-of-line
+
 # Make the Delete key remove the character under the cursor.
 [[ -n "${terminfo[kdch1]}" ]] && bindkey -- "${terminfo[kdch1]}" delete-char
 
