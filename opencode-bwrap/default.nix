@@ -81,7 +81,7 @@
         uv.disabled = true;
         nixfmt.disabled = true;
         prettier.disabled = true;
-        gofmt.disable = true;
+        gofmt.disabled = true;
         treefmt = {
           command = ["treefmt" "$FILE"];
           extensions = [
@@ -284,6 +284,7 @@
 
       # Host env vars forwarded into the sandbox (skipped if unset).
       host_env_forward=(
+        COLORTERM
         HOME
         LANG
         LOCALE_ARCHIVE

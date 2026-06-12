@@ -1,8 +1,8 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
-    # We take opencode 1.4.3 from:
-    nixpkgs-opencode.url = "github:NixOS/nixpkgs/ca4120ec8edf1085d0c7f6c5b3ea37bf546333ec";
+    # We take opencode 1.16.2 from:
+    nixpkgs-opencode.url = "github:NixOS/nixpkgs/f37978477bb931ceac4e730d201fe2a089c8c9f6";
     bun2nix = {
       url = "github:nix-community/bun2nix";
       inputs.nixpkgs.follows = "nixpkgs";

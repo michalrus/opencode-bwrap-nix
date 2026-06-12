@@ -1,54 +1,54 @@
 diff --git a/packages/opencode/src/session/instruction.ts b/packages/opencode/src/session/instruction.ts
-index fc90093e9..1d54e9fbd 100644
+index 5a145a212..34ba8d6b0 100644
 --- a/packages/opencode/src/session/instruction.ts
 +++ b/packages/opencode/src/session/instruction.ts
-@@ -8,6 +8,7 @@ import { makeRuntime } from "@/effect/run-service"
- import { Flag } from "@/flag/flag"
- import { AppFileSystem } from "@/filesystem"
+@@ -8,6 +8,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
+ import { Flag } from "@opencode-ai/core/flag/flag"
+ import { FSUtil } from "@opencode-ai/core/fs-util"
  import { withTransientReadRetry } from "@/util/effect-http-client"
 +import { Process } from "@/util/process"
- import { Global } from "../global"
- import { Instance } from "../project/instance"
- import { Log } from "../util/log"
-@@ -114,6 +115,28 @@ export namespace Instruction {
-           return new TextDecoder().decode(body)
-         })
+ import { Global } from "@opencode-ai/core/global"
+ import type { MessageV2 } from "./message-v2"
+ import type { MessageID } from "./schema"
+@@ -100,6 +101,28 @@ export const layer: Layer.Layer<
+       return new TextDecoder().decode(body)
+     })
  
-+        const command = Effect.fnUntraced(function* () {
-+          const cmd = process.env.OPENCODE_EXTRA_INSTRUCTIONS_COMMAND
-+          if (!cmd) return ""
-+          if (!path.isAbsolute(cmd)) {
-+            log.warn("OPENCODE_EXTRA_INSTRUCTIONS_COMMAND ignored: must be an absolute path", { cmd })
++    const command = Effect.fnUntraced(function* () {
++      const cmd = process.env.OPENCODE_EXTRA_INSTRUCTIONS_COMMAND
++      if (!cmd) return ""
++      if (!path.isAbsolute(cmd)) {
++        yield* Effect.logWarning("OPENCODE_EXTRA_INSTRUCTIONS_COMMAND ignored: must be an absolute path")
++        return ""
++      }
++      return yield* Effect.promise(() =>
++        Process.text([cmd], { abort: AbortSignal.timeout(10_000) }).then((out) => {
++          const text = out.text.trim()
++          return text ? `Instructions from command: ${cmd}\n${text}` : ""
++        }),
++      ).pipe(
++        Effect.catch(() =>
++          Effect.gen(function* () {
++            yield* Effect.logWarning("OPENCODE_EXTRA_INSTRUCTIONS_COMMAND failed")
 +            return ""
-+          }
-+          return yield* Effect.promise(() =>
-+            Process.text([cmd], { abort: AbortSignal.timeout(10_000) }).then((out) => {
-+              const text = out.text.trim()
-+              return text ? `Instructions from command: ${cmd}\n${text}` : ""
-+            }),
-+          ).pipe(
-+            Effect.catch((err) =>
-+              Effect.sync(() => {
-+                log.warn("OPENCODE_EXTRA_INSTRUCTIONS_COMMAND failed", { cmd, error: String(err) })
-+                return ""
-+              }),
-+            ),
-+          )
-+        })
++          }),
++        ),
++      )
++    })
 +
-         const clear = Effect.fn("Instruction.clear")(function* (messageID: MessageID) {
-           const s = yield* InstanceState.get(state)
-           s.claims.delete(messageID)
-@@ -168,10 +191,12 @@ export namespace Instruction {
-             (item) => item.startsWith("https://") || item.startsWith("http://"),
-           )
+     const clear = Effect.fn("Instruction.clear")(function* (messageID: MessageID) {
+       const s = yield* InstanceState.get(state)
+       s.claims.delete(messageID)
+@@ -157,10 +180,12 @@ export const layer: Layer.Layer<
+         (item) => item.startsWith("https://") || item.startsWith("http://"),
+       )
  
-+          const extra = yield* command()
-           const files = yield* Effect.forEach(Array.from(paths), read, { concurrency: 8 })
-           const remote = yield* Effect.forEach(urls, fetch, { concurrency: 4 })
++      const extra = yield* command()
+       const files = yield* Effect.forEach(Array.from(paths), read, { concurrency: 8 })
+       const remote = yield* Effect.forEach(urls, fetch, { concurrency: 4 })
  
-           return [
-+            ...(extra ? [extra] : []),
-             ...Array.from(paths).flatMap((item, i) => (files[i] ? [`Instructions from: ${item}\n${files[i]}`] : [])),
-             ...urls.flatMap((item, i) => (remote[i] ? [`Instructions from: ${item}\n${remote[i]}`] : [])),
-           ]
+       return [
++        ...(extra ? [extra] : []),
+         ...Array.from(paths).flatMap((item, i) => (files[i] ? [`Instructions from: ${item}\n${files[i]}`] : [])),
+         ...urls.flatMap((item, i) => (remote[i] ? [`Instructions from: ${item}\n${remote[i]}`] : [])),
+       ]

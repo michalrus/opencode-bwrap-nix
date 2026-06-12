@@ -1,11 +1,11 @@
 diff --git a/packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx b/packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx
-index 045d730c9..06ea70de9 100644
+index dc363a4b9..730af0540 100644
 --- a/packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx
 +++ b/packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx
-@@ -1095,6 +1095,7 @@ export function Prompt(props: PromptProps) {
+@@ -1447,6 +1447,7 @@ export function Prompt(props: PromptProps) {
                onMouseDown={(r: MouseEvent) => r.target?.focus()}
                focusedBackgroundColor={theme.backgroundElement}
-               cursorColor={theme.text}
+               cursorColor={props.disabled ? theme.backgroundElement : theme.text}
 +              cursorStyle={{ style: "line", blinking: true }}
                syntaxStyle={syntax()}
              />
