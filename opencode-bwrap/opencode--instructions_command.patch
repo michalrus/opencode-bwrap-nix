@@ -1,5 +1,5 @@
 diff --git a/packages/opencode/src/session/instruction.ts b/packages/opencode/src/session/instruction.ts
-index 5a145a212..34ba8d6b0 100644
+index 5a145a212..d527e20d0 100644
 --- a/packages/opencode/src/session/instruction.ts
 +++ b/packages/opencode/src/session/instruction.ts
 @@ -8,6 +8,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -39,6 +39,15 @@ index 5a145a212..34ba8d6b0 100644
      const clear = Effect.fn("Instruction.clear")(function* (messageID: MessageID) {
        const s = yield* InstanceState.get(state)
        s.claims.delete(messageID)
+@@ -118,7 +141,7 @@ export const layer: Layer.Layer<
+       }
+ 
+       // The first project-level match wins so we don't stack AGENTS.md/CLAUDE.md from every ancestor.
+-      if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
++      if (true || !Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
+         for (const file of instructionFiles) {
+           const matches = yield* fs
+             .findUp(file, ctx.directory, ctx.worktree)
 @@ -157,10 +180,12 @@ export const layer: Layer.Layer<
          (item) => item.startsWith("https://") || item.startsWith("http://"),
        )
