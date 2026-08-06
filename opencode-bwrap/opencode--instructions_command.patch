@@ -1,5 +1,5 @@
 diff --git a/packages/opencode/src/session/instruction.ts b/packages/opencode/src/session/instruction.ts
-index 5a145a212..d527e20d0 100644
+index 5a145a212..15c7ba380 100644
 --- a/packages/opencode/src/session/instruction.ts
 +++ b/packages/opencode/src/session/instruction.ts
 @@ -8,6 +8,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -10,7 +10,7 @@ index 5a145a212..d527e20d0 100644
  import { Global } from "@opencode-ai/core/global"
  import type { MessageV2 } from "./message-v2"
  import type { MessageID } from "./schema"
-@@ -100,6 +101,28 @@ export const layer: Layer.Layer<
+@@ -100,6 +101,33 @@ export const layer: Layer.Layer<
        return new TextDecoder().decode(body)
      })
  
@@ -21,34 +21,30 @@ index 5a145a212..d527e20d0 100644
 +        yield* Effect.logWarning("OPENCODE_EXTRA_INSTRUCTIONS_COMMAND ignored: must be an absolute path")
 +        return ""
 +      }
-+      return yield* Effect.promise(() =>
-+        Process.text([cmd], { abort: AbortSignal.timeout(10_000) }).then((out) => {
-+          const text = out.text.trim()
-+          return text ? `Instructions from command: ${cmd}\n${text}` : ""
-+        }),
++      const out = yield* Effect.promise(() =>
++        Process.text([cmd], { abort: AbortSignal.timeout(10_000), nothrow: true }),
 +      ).pipe(
 +        Effect.catch(() =>
 +          Effect.gen(function* () {
 +            yield* Effect.logWarning("OPENCODE_EXTRA_INSTRUCTIONS_COMMAND failed")
-+            return ""
++            return undefined
 +          }),
 +        ),
 +      )
++      if (!out) return ""
++      const warning = out.stderr.toString().trim()
++      if (warning) yield* Effect.logWarning(warning)
++      if (out.code !== 0) {
++        yield* Effect.logWarning(`OPENCODE_EXTRA_INSTRUCTIONS_COMMAND exited with code ${out.code}`)
++      }
++      const text = out.text.trim()
++      return text ? `Instructions from command: ${cmd}\n${text}` : ""
 +    })
 +
      const clear = Effect.fn("Instruction.clear")(function* (messageID: MessageID) {
        const s = yield* InstanceState.get(state)
        s.claims.delete(messageID)
-@@ -118,7 +141,7 @@ export const layer: Layer.Layer<
-       }
- 
-       // The first project-level match wins so we don't stack AGENTS.md/CLAUDE.md from every ancestor.
--      if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
-+      if (true || !Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
-         for (const file of instructionFiles) {
-           const matches = yield* fs
-             .findUp(file, ctx.directory, ctx.worktree)
-@@ -157,10 +180,12 @@ export const layer: Layer.Layer<
+@@ -157,10 +185,12 @@ export const layer: Layer.Layer<
          (item) => item.startsWith("https://") || item.startsWith("http://"),
        )
  

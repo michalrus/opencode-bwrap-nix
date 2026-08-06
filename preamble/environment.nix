@@ -17,8 +17,8 @@
     };
   };
 
-  preamble = pkgs.writeShellApplication {
-    name = "preamble-cmd";
+  preambleEnvironment = pkgs.writeShellApplication {
+    name = "preamble-environment-cmd";
     runtimeInputs =
       [git-tree-digest]
       ++ (with pkgs; [
@@ -29,7 +29,7 @@
         tree
         gnused
       ]);
-    text = builtins.readFile ./preamble.sh;
+    text = builtins.readFile ./environment.sh;
   };
 in
-  preamble
+  preambleEnvironment

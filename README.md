@@ -64,6 +64,7 @@ sandbox instead of starting an interactive shell.
 | -------------------------- | ---------------- | --------------------------------------------------------------- |
 | `enable`                   | bool             | Enable the sandbox wrapper                                      |
 | `preamble`                 | path             | Instructions file mounted into the sandbox                      |
+| `preambleScripts`          | list             | Ordered executable packages or paths appended at runtime        |
 | `dataDirPrefix`            | string           | Relative path under `$HOME` for persistent sandbox state        |
 | `bashrc` / `zshrc`         | path             | Shell configs sourced inside the sandbox                        |
 | `extraPackages`            | list of packages | Additional packages on the sandbox PATH                         |
@@ -76,10 +77,49 @@ sandbox instead of starting an interactive shell.
 | `notifications.messages.*` | string           | Per-event notification body templates                           |
 | `notifications.extraRules` | list of rules    | Additional escape-hatch allow-list entries                      |
 
+### Preamble scripts
+
+`preambleScripts` defaults to the environment and repository summary followed
+by hierarchical project instructions. Setting the option replaces that default.
+Include both provided packages explicitly when composing them with your own
+executable:
+
+```nix
+programs.opencode-bwrap.preambleScripts = [
+  inputs.opencode-bwrap.packages.${pkgs.system}.preamble-environment
+  inputs.opencode-bwrap.packages.${pkgs.system}.preamble-project-instructions
+  (pkgs.writeShellApplication {
+    name = "my-opencode-preamble";
+    text = ''
+      printf '%s\n' 'Additional runtime instructions'
+    '';
+  })
+];
+```
+
+To keep the environment summary without loading project instruction files:
+
+```nix
+programs.opencode-bwrap.preambleScripts = [
+  inputs.opencode-bwrap.packages.${pkgs.system}.preamble-environment
+];
+```
+
+Scripts run serially in the OpenCode working directory. Their standard output
+is added to the system prompt in list order. A failing script is reported and
+does not prevent later scripts from running. The
+`preamble-project-instructions` package searches from the working directory to
+the Git root. In each directory from the root through the working directory, it
+loads at most one file in this priority order: `AGENTS.md`, `CLAUDE.md`, then
+`CONTEXT.md`. Files nearer the working directory are appended later so they can
+specialize broader repository instructions.
+
 ## Building from source
 
 ```
 nix build -L .#opencode-bwrap      # main sandboxed wrapper
+nix build -L .#preamble-environment # default runtime preamble
+nix build -L .#preamble-project-instructions
 ```
 
 Supported systems: `x86_64-linux`, `aarch64-linux`.

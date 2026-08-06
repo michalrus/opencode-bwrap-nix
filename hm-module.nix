@@ -19,6 +19,10 @@
 
   escapeHatch = pkgs.callPackage ./bwrap-escape-hatch {};
 
+  environmentPreambleScript = pkgs.callPackage ./preamble/environment.nix {};
+  projectInstructionsPreambleScript = pkgs.callPackage ./preamble/project-instructions.nix {};
+  preambleScriptType = types.coercedTo types.package lib.getExe types.path;
+
   # -- Notification sounds -------------------------------------------------
 
   # Default sound source repository (only fetched when sounds are needed).
@@ -114,7 +118,7 @@
     treefmtEnabled = cfg.treefmt.enable;
     bwrap-escape-hatch = escapeHatch;
     preamblePath = cfg.preamble;
-    preambleScriptPath = cfg.preambleScript;
+    preambleScriptPaths = cfg.preambleScripts;
     bashrcSource = cfg.bashrc;
     zshrcSource = cfg.zshrc;
     compactionConfig =
@@ -171,11 +175,14 @@ in {
       description = "Path to the preamble / instructions file mounted into the sandbox.";
     };
 
-    preambleScript = mkOption {
-      type = types.nullOr types.path;
-      default = lib.getExe (import ./preamble pkgs);
-      example = literalExpression ''null'';
-      description = "Store path to a script whose stdout is appended to the preamble at runtime (sets `instructions_command` in the OpenCode config). `null` disables the feature.";
+    preambleScripts = mkOption {
+      type = types.listOf preambleScriptType;
+      default = [
+        environmentPreambleScript
+        projectInstructionsPreambleScript
+      ];
+      example = literalExpression "[ pkgs.my-preamble ./another-preamble.sh ]";
+      description = "Ordered list of executable packages or absolute executable paths whose stdout is appended to the preamble at runtime. An empty list disables the feature.";
     };
 
     dataDirPrefix = mkOption {

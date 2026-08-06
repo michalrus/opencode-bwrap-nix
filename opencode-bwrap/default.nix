@@ -8,7 +8,7 @@
   bwrap-escape-hatch,
   # Overridable by the home-manager module:
   preamblePath ? ./preamble.md,
-  preambleScriptPath ? null,
+  preambleScriptPaths ? [],
   dataDirPrefix ? ".local/share/opencode-bwrap",
   bashrcSource ? ./bashrc,
   zshrcSource ? ./zshrc,
@@ -150,6 +150,18 @@
       theme = "solarized";
     }
   ];
+
+  preambleCommand = pkgs.writeShellScript "opencode-preamble-command" (
+    lib.concatMapStringsSep "\n" (script: let
+      command = lib.escapeShellArg (toString script);
+    in ''
+      if ! ${command}; then
+        printf >&2 'Preamble command failed: %s\n' ${command}
+      fi
+      printf '\n'
+    '')
+    preambleScriptPaths
+  );
 
   # Runs inside the sandbox before the interactive shell.
   sandboxInit = pkgs.writeShellScript "sandbox-init" ''
@@ -340,8 +352,8 @@
         done
       ''}
 
-      ${lib.optionalString (preambleScriptPath != null) ''
-        bwrap_opts+=( --setenv OPENCODE_EXTRA_INSTRUCTIONS_COMMAND "${preambleScriptPath}" )
+      ${lib.optionalString (preambleScriptPaths != []) ''
+        bwrap_opts+=( --setenv OPENCODE_EXTRA_INSTRUCTIONS_COMMAND "${preambleCommand}" )
       ''}
 
       # OpenCode plugins (pinned via fetchFromGitHub, mounted read-only)
