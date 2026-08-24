@@ -66,6 +66,7 @@
     extraConfig
     {
       "$schema" = "https://opencode.ai/config.json";
+      shell = lib.mkDefault (lib.getExe pkgs.bash);
       compaction = compactionConfig;
       share = "disabled";
       lsp = false;
