@@ -1,0 +1,72 @@
+diff --git a/packages/opencode/src/provider/provider.ts b/packages/opencode/src/provider/provider.ts
+index 2142f8434..6a7cc4a87 100644
+--- a/packages/opencode/src/provider/provider.ts
++++ b/packages/opencode/src/provider/provider.ts
+@@ -1291,6 +1291,11 @@ export const layer = Layer.effect(
+         const bridge = yield* EffectBridge.make()
+         const cfg = yield* config.get()
+         const modelsDev = yield* modelsDevSvc.get()
++        const configuredMaxContextTokens = Number(process.env.OPENCODE_MAX_CONTEXT_TOKENS ?? 224 * 1024)
++        const maxContextTokens =
++          Number.isSafeInteger(configuredMaxContextTokens) && configuredMaxContextTokens > 0
++            ? configuredMaxContextTokens
++            : 224 * 1024
+         const catalog = mapValues(modelsDev, fromModelsDevProvider)
+         const database = mapValues(catalog, toPublicInfo)
+ 
+@@ -1566,6 +1571,12 @@ export const layer = Layer.effect(
+ 
+           for (const [modelID, model] of Object.entries(provider.models)) {
+             model.api.id = model.api.id ?? model.id ?? modelID
++            if (model.limit.context > 0) {
++              model.limit.context = Math.min(model.limit.context, maxContextTokens)
++              if (model.limit.input !== undefined) {
++                model.limit.input = Math.min(model.limit.input, model.limit.context)
++              }
++            }
+             if (
+               // These chat aliases are invalid for the special handling in the
+               // built-in providers below, but custom providers may support them.
+diff --git a/packages/opencode/test/provider/provider.test.ts b/packages/opencode/test/provider/provider.test.ts
+index 6edfc97ca..30be9d50f 100644
+--- a/packages/opencode/test/provider/provider.test.ts
++++ b/packages/opencode/test/provider/provider.test.ts
+@@ -1098,6 +1098,38 @@ it.instance(
+   },
+ )
+ 
++it.instance(
++  "environment context cap does not raise smaller model limits",
++  Effect.gen(function* () {
++    yield* setProcessEnv("OPENCODE_MAX_CONTEXT_TOKENS", "120000")
++    const models = (yield* list)[ProviderV2.ID.make("context-cap")].models
++    expect(models.large.limit).toEqual({ context: 120_000, input: 120_000, output: 128_000 })
++    expect(models.small.limit).toEqual({ context: 100_000, input: 90_000, output: 10_000 })
++  }),
++  {
++    config: {
++      provider: {
++        "context-cap": {
++          name: "Context Cap",
++          npm: "@ai-sdk/openai-compatible",
++          env: [],
++          models: {
++            large: {
++              name: "Large Model",
++              limit: { context: 1_050_000, input: 922_000, output: 128_000 },
++            },
++            small: {
++              name: "Small Model",
++              limit: { context: 100_000, input: 90_000, output: 10_000 },
++            },
++          },
++          options: { apiKey: "test" },
++        },
++      },
++    },
++  },
++)
++
+ it.instance(
+   "provider options are deeply merged",
+   Effect.gen(function* () {

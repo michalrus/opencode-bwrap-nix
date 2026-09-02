@@ -31,6 +31,7 @@
       ++ [
         ./opencode--instructions_command.patch
         ./opencode--cursor-beam.patch
+        ./opencode--max-context-tokens.patch
       ];
   });
 

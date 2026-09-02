@@ -127,7 +127,8 @@
         inherit (cfg.compaction) reserved;
       };
     providerJSON = cfg.provider;
-    inherit (cfg) dataDirPrefix extraConfig extraTuiConfig extraPackages extraEnv extraFwdEnv;
+    extraEnv = cfg.extraEnv // {OPENCODE_MAX_CONTEXT_TOKENS = toString cfg.maxContextTokens;};
+    inherit (cfg) dataDirPrefix extraConfig extraTuiConfig extraPackages extraFwdEnv;
   };
 
   # -- Option helpers (DRY) ------------------------------------------------
@@ -239,6 +240,13 @@ in {
       default = [];
       example = ["ANTHROPIC_API_KEY" "GITHUB_TOKEN"];
       description = "Host environment variable names to forward into the sandbox (only set when non-empty on the host).";
+    };
+
+    maxContextTokens = mkOption {
+      type = types.ints.positive;
+      default = 224 * 1024;
+      example = 200000;
+      description = "Maximum context and input token count that OpenCode uses for any model. Smaller model limits stay unchanged.";
     };
 
     serena = {

@@ -70,6 +70,7 @@ sandbox instead of starting an interactive shell.
 | `extraPackages`            | list of packages | Additional packages on the sandbox PATH                         |
 | `extraEnv`                 | attrs of strings | Static env vars set in the sandbox                              |
 | `extraFwdEnv`              | list of strings  | Host env vars forwarded into the sandbox                        |
+| `maxContextTokens`         | positive integer | Maximum model context and input tokens (default: 224\*1024)     |
 | `treefmt.enable`           | bool             | Use treefmt as exclusive formatter (default: true)              |
 | `serena.enable`            | bool             | Serena MCP integration for code navigation (default: true)      |
 | `notifications.enable`     | bool             | Desktop notifications + sounds via escape hatch (default: true) |
