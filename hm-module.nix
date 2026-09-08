@@ -128,6 +128,7 @@
       };
     providerJSON = cfg.provider;
     extraEnv = cfg.extraEnv // {OPENCODE_MAX_CONTEXT_TOKENS = toString cfg.maxContextTokens;};
+    commandPaths = cfg.commands;
     inherit (cfg) dataDirPrefix extraConfig extraTuiConfig extraPackages extraFwdEnv;
   };
 
@@ -203,6 +204,18 @@ in {
       type = types.path;
       default = ./opencode-bwrap/zshrc;
       description = "Zsh configuration sourced inside the sandbox.";
+    };
+
+    commands = mkOption {
+      type = types.attrsOf types.path;
+      default = {};
+      example = literalExpression ''
+        {
+          review = ./commands/review.md;
+          "create-component" = ./commands/create-component.md;
+        }
+      '';
+      description = "Global OpenCode command files mounted read-only in the sandbox. Attribute names become command names, and values are Markdown file paths.";
     };
 
     extraConfig = mkOption {
@@ -338,6 +351,10 @@ in {
       {
         assertion = lib.all (name: builtins.match "[a-zA-Z_][a-zA-Z_0-9]*" name != null) cfg.extraFwdEnv;
         message = "programs.opencode-bwrap.extraFwdEnv: every entry must be a valid POSIX variable name ([a-zA-Z_][a-zA-Z_0-9]*)";
+      }
+      {
+        assertion = lib.all (name: builtins.match "[a-zA-Z0-9][a-zA-Z0-9_-]*" name != null) (builtins.attrNames cfg.commands);
+        message = "programs.opencode-bwrap.commands: every command name must match [a-zA-Z0-9][a-zA-Z0-9_-]*";
       }
     ];
 

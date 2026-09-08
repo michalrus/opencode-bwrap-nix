@@ -67,6 +67,7 @@ sandbox instead of starting an interactive shell.
 | `preambleScripts`          | list             | Ordered executable packages or paths appended at runtime        |
 | `dataDirPrefix`            | string           | Relative path under `$HOME` for persistent sandbox state        |
 | `bashrc` / `zshrc`         | path             | Shell configs sourced inside the sandbox                        |
+| `commands`                 | attrs of paths   | Global command names and their Markdown source files            |
 | `extraPackages`            | list of packages | Additional packages on the sandbox PATH                         |
 | `extraEnv`                 | attrs of strings | Static env vars set in the sandbox                              |
 | `extraFwdEnv`              | list of strings  | Host env vars forwarded into the sandbox                        |
@@ -77,6 +78,22 @@ sandbox instead of starting an interactive shell.
 | `notifications.sounds.*`   | path or null     | Per-event sound files (converted to WAV at build time)          |
 | `notifications.messages.*` | string           | Per-event notification body templates                           |
 | `notifications.extraRules` | list of rules    | Additional escape-hatch allow-list entries                      |
+
+### Custom commands
+
+`commands` maps each slash-command name to a Markdown source path. The module
+mounts each file read-only at `~/.config/opencode/commands/<name>.md` in the
+sandbox.
+
+```nix
+programs.opencode-bwrap.commands = {
+  review = ./commands/review.md;
+  "create-component" = ./commands/create-component.md;
+};
+```
+
+The files provide `/review` and `/create-component`. Other command files in
+the persistent sandbox remain available.
 
 ### Preamble scripts
 

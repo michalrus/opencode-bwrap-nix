@@ -17,6 +17,7 @@
   extraPackages ? [],
   extraEnv ? {},
   extraFwdEnv ? [],
+  commandPaths ? {},
   notifierConfig ? plugins.opencode-notifier-config,
   treefmtEnabled ? true,
   compactionConfig ? {
@@ -164,6 +165,16 @@
     '')
     preambleScriptPaths
   );
+
+  commandSources = lib.mapAttrs (name: source:
+    if lib.hasPrefix "${builtins.storeDir}/" (toString source)
+    then source
+    else
+      builtins.path {
+        path = source;
+        name = "opencode-command-${name}.md";
+      })
+  commandPaths;
 
   # Runs inside the sandbox before the interactive shell.
   sandboxInit = pkgs.writeShellScript "sandbox-init" ''
@@ -356,6 +367,14 @@
 
       ${lib.optionalString (preambleScriptPaths != []) ''
         bwrap_opts+=( --setenv OPENCODE_EXTRA_INSTRUCTIONS_COMMAND "${preambleCommand}" )
+      ''}
+
+      ${lib.optionalString (commandSources != {}) ''
+        mkdir -p "$sandbox_home"/.config/opencode/commands
+        ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: source: ''
+            bwrap_opts+=( --ro-bind ${lib.escapeShellArg (toString source)} "$HOME"/${lib.escapeShellArg ".config/opencode/commands/${name}.md"} )
+          '')
+          commandSources)}
       ''}
 
       # OpenCode plugins (pinned via fetchFromGitHub, mounted read-only)
