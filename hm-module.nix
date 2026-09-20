@@ -129,7 +129,7 @@
     providerJSON = cfg.provider;
     extraEnv = cfg.extraEnv // {OPENCODE_MAX_CONTEXT_TOKENS = toString cfg.maxContextTokens;};
     commandPaths = cfg.commands;
-    inherit (cfg) dataDirPrefix extraConfig extraTuiConfig extraPackages extraFwdEnv;
+    inherit (cfg) dataDirPrefix extraConfig extraTuiConfig extraEnvFiles extraPackages extraFwdEnv;
   };
 
   # -- Option helpers (DRY) ------------------------------------------------
@@ -255,6 +255,13 @@ in {
       description = "Host environment variable names to forward into the sandbox (only set when non-empty on the host).";
     };
 
+    extraEnvFiles = mkOption {
+      type = types.attrsOf types.str;
+      default = {};
+      example = {ANTHROPIC_API_KEY = ".config/opencode/anthropic-api.key";};
+      description = "Environment variables read from non-empty files in the persistent sandbox home. Values are paths relative to that home.";
+    };
+
     maxContextTokens = mkOption {
       type = types.ints.positive;
       default = 224 * 1024;
@@ -351,6 +358,14 @@ in {
       {
         assertion = lib.all (name: builtins.match "[a-zA-Z_][a-zA-Z_0-9]*" name != null) cfg.extraFwdEnv;
         message = "programs.opencode-bwrap.extraFwdEnv: every entry must be a valid POSIX variable name ([a-zA-Z_][a-zA-Z_0-9]*)";
+      }
+      {
+        assertion = lib.all (name: builtins.match "[a-zA-Z_][a-zA-Z_0-9]*" name != null) (builtins.attrNames cfg.extraEnvFiles);
+        message = "programs.opencode-bwrap.extraEnvFiles: every key must be a valid POSIX variable name ([a-zA-Z_][a-zA-Z_0-9]*)";
+      }
+      {
+        assertion = lib.all (path: lib.all (segment: segment != "" && segment != "." && segment != "..") (lib.splitString "/" path)) (builtins.attrValues cfg.extraEnvFiles);
+        message = "programs.opencode-bwrap.extraEnvFiles: every value must be a normalized relative path under the persistent sandbox home (no empty, '.' or '..' segments)";
       }
       {
         assertion = lib.all (name: builtins.match "[a-zA-Z0-9][a-zA-Z0-9_-]*" name != null) (builtins.attrNames cfg.commands);

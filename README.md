@@ -70,6 +70,7 @@ sandbox instead of starting an interactive shell.
 | `commands`                 | attrs of paths   | Global command names and their Markdown source files            |
 | `extraPackages`            | list of packages | Additional packages on the sandbox PATH                         |
 | `extraEnv`                 | attrs of strings | Static env vars set in the sandbox                              |
+| `extraEnvFiles`            | attrs of strings | Env vars read from files in the persistent sandbox home         |
 | `extraFwdEnv`              | list of strings  | Host env vars forwarded into the sandbox                        |
 | `maxContextTokens`         | positive integer | Maximum model context and input tokens (default: 224\*1024)     |
 | `treefmt.enable`           | bool             | Use treefmt as exclusive formatter (default: true)              |
@@ -94,6 +95,19 @@ programs.opencode-bwrap.commands = {
 
 The files provide `/review` and `/create-component`. Other command files in
 the persistent sandbox remain available.
+
+### Secret files
+
+`extraEnvFiles` reads each non-empty file when the sandbox starts and exports
+its contents as the mapped environment variable. Paths are relative to the
+persistent sandbox home, so the key is neither stored in a Nix derivation nor
+read from the host environment.
+
+```nix
+programs.opencode-bwrap.extraEnvFiles = {
+  SOME_API_KEY = ".config/opencode/some-api.key";
+};
+```
 
 ### Preamble scripts
 

@@ -16,6 +16,7 @@
   extraTuiConfig ? {},
   extraPackages ? [],
   extraEnv ? {},
+  extraEnvFiles ? {},
   extraFwdEnv ? [],
   commandPaths ? {},
   notifierConfig ? plugins.opencode-notifier-config,
@@ -355,6 +356,19 @@
           bwrap_opts+=( --setenv ${lib.escapeShellArg name} ${lib.escapeShellArg value} )
         '')
         extraEnv)}
+
+      # Read secrets from files in the persistent sandbox home. This happens at
+      # runtime, so neither their paths' contents nor their values enter Nix.
+      ${lib.concatStringsSep "\n" (lib.mapAttrsToList (name: path: ''
+          _secret_file="$sandbox_home"/${lib.escapeShellArg path}
+          if [ -f "$_secret_file" ]; then
+            _secret=$(<"$_secret_file")
+            if [ -n "$_secret" ]; then
+              bwrap_opts+=( --setenv ${lib.escapeShellArg name} "$_secret" )
+            fi
+          fi
+        '')
+        extraEnvFiles)}
 
       ${lib.optionalString (extraFwdEnv != []) ''
         # Forward host environment variables into the sandbox
