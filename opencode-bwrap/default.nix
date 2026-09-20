@@ -358,6 +358,7 @@
 
       ${lib.optionalString (extraFwdEnv != []) ''
         # Forward host environment variables into the sandbox
+        # shellcheck disable=SC2043
         for _var in ${lib.concatMapStringsSep " " lib.escapeShellArg extraFwdEnv}; do
           if [ -n "''${!_var+x}" ]; then
             bwrap_opts+=( --setenv "$_var" "''${!_var}" )
