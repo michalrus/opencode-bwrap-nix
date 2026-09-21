@@ -1,28 +1,59 @@
 diff --git a/packages/opencode/src/session/instruction.ts b/packages/opencode/src/session/instruction.ts
-index 5a145a212..15c7ba380 100644
+index 5a145a212..9cf99bdfa 100644
 --- a/packages/opencode/src/session/instruction.ts
 +++ b/packages/opencode/src/session/instruction.ts
-@@ -8,6 +8,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
+@@ -8,9 +8,10 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
  import { Flag } from "@opencode-ai/core/flag/flag"
  import { FSUtil } from "@opencode-ai/core/fs-util"
  import { withTransientReadRetry } from "@/util/effect-http-client"
 +import { Process } from "@/util/process"
  import { Global } from "@opencode-ai/core/global"
  import type { MessageV2 } from "./message-v2"
- import type { MessageID } from "./schema"
-@@ -100,6 +101,33 @@ export const layer: Layer.Layer<
+-import type { MessageID } from "./schema"
++import type { MessageID, SessionID } from "./schema"
+ 
+ function extract(messages: SessionV1.WithParts[]) {
+   const paths = new Set<string>()
+@@ -32,7 +33,7 @@ function extract(messages: SessionV1.WithParts[]) {
+ export interface Interface {
+   readonly clear: (messageID: MessageID) => Effect.Effect<void>
+   readonly systemPaths: () => Effect.Effect<Set<string>, FSUtil.Error>
+-  readonly system: () => Effect.Effect<string[], FSUtil.Error>
++  readonly system: (sessionID: SessionID) => Effect.Effect<string[], FSUtil.Error>
+   readonly find: (dir: string) => Effect.Effect<string | undefined, FSUtil.Error>
+   readonly resolve: (
+     messages: SessionV1.WithParts[],
+@@ -70,6 +71,7 @@ export const layer: Layer.Layer<
+         Effect.succeed({
+           // Track which instruction files have already been attached for a given assistant message.
+           claims: new Map<MessageID, Set<string>>(),
++          command: new Map<SessionID, string>(),
+         }),
+       ),
+     )
+@@ -100,6 +102,46 @@ export const layer: Layer.Layer<
        return new TextDecoder().decode(body)
      })
  
-+    const command = Effect.fnUntraced(function* () {
++    const command = Effect.fnUntraced(function* (sessionID: SessionID) {
++      const stateValue = yield* InstanceState.get(state)
++      const cached = stateValue.command.get(sessionID)
++      if (cached !== undefined) return cached
++
 +      const cmd = process.env.OPENCODE_EXTRA_INSTRUCTIONS_COMMAND
-+      if (!cmd) return ""
++      let result = ""
++      if (!cmd) {
++        stateValue.command.set(sessionID, result)
++        return result
++      }
 +      if (!path.isAbsolute(cmd)) {
 +        yield* Effect.logWarning("OPENCODE_EXTRA_INSTRUCTIONS_COMMAND ignored: must be an absolute path")
-+        return ""
++        stateValue.command.set(sessionID, result)
++        return result
 +      }
++      const ctx = yield* InstanceState.context
 +      const out = yield* Effect.promise(() =>
-+        Process.text([cmd], { abort: AbortSignal.timeout(10_000), nothrow: true }),
++        Process.text([cmd], { abort: AbortSignal.timeout(10_000), cwd: ctx.directory, nothrow: true }),
 +      ).pipe(
 +        Effect.catch(() =>
 +          Effect.gen(function* () {
@@ -31,24 +62,35 @@ index 5a145a212..15c7ba380 100644
 +          }),
 +        ),
 +      )
-+      if (!out) return ""
-+      const warning = out.stderr.toString().trim()
-+      if (warning) yield* Effect.logWarning(warning)
-+      if (out.code !== 0) {
-+        yield* Effect.logWarning(`OPENCODE_EXTRA_INSTRUCTIONS_COMMAND exited with code ${out.code}`)
++      if (out) {
++        const warning = out.stderr.toString().trim()
++        if (warning) yield* Effect.logWarning(warning)
++        if (out.code !== 0) {
++          yield* Effect.logWarning(`OPENCODE_EXTRA_INSTRUCTIONS_COMMAND exited with code ${out.code}`)
++        }
++        const text = out.text.trim()
++        result = text ? `Instructions from command: ${cmd}\n${text}` : ""
 +      }
-+      const text = out.text.trim()
-+      return text ? `Instructions from command: ${cmd}\n${text}` : ""
++      stateValue.command.set(sessionID, result)
++      return result
 +    })
 +
      const clear = Effect.fn("Instruction.clear")(function* (messageID: MessageID) {
        const s = yield* InstanceState.get(state)
        s.claims.delete(messageID)
-@@ -157,10 +185,12 @@ export const layer: Layer.Layer<
+@@ -150,17 +192,19 @@ export const layer: Layer.Layer<
+       return paths
+     })
+ 
+-    const system = Effect.fn("Instruction.system")(function* () {
++    const system = Effect.fn("Instruction.system")(function* (sessionID: SessionID) {
+       const config = yield* cfg.get()
+       const paths = yield* systemPaths()
+       const urls = (config.instructions ?? []).filter(
          (item) => item.startsWith("https://") || item.startsWith("http://"),
        )
  
-+      const extra = yield* command()
++      const extra = yield* command(sessionID)
        const files = yield* Effect.forEach(Array.from(paths), read, { concurrency: 8 })
        const remote = yield* Effect.forEach(urls, fetch, { concurrency: 4 })
  
@@ -57,3 +99,85 @@ index 5a145a212..15c7ba380 100644
          ...Array.from(paths).flatMap((item, i) => (files[i] ? [`Instructions from: ${item}\n${files[i]}`] : [])),
          ...urls.flatMap((item, i) => (remote[i] ? [`Instructions from: ${item}\n${remote[i]}`] : [])),
        ]
+diff --git a/packages/opencode/src/session/prompt.ts b/packages/opencode/src/session/prompt.ts
+index d036c6542..4892ec797 100644
+--- a/packages/opencode/src/session/prompt.ts
++++ b/packages/opencode/src/session/prompt.ts
+@@ -1410,7 +1410,7 @@ export const layer = Layer.effect(
+             const [skills, env, instructions, modelMsgs] = yield* Effect.all([
+               sys.skills(agent),
+               sys.environment(model),
+-              instruction.system().pipe(Effect.orDie),
++              instruction.system(sessionID).pipe(Effect.orDie),
+               MessageV2.toModelMessagesEffect(msgs, model),
+             ])
+             const system = [...env, ...instructions, ...(skills ? [skills] : [])]
+diff --git a/packages/opencode/test/session/instruction.test.ts b/packages/opencode/test/session/instruction.test.ts
+index 53ccf06e1..ec7257cea 100644
+--- a/packages/opencode/test/session/instruction.test.ts
++++ b/packages/opencode/test/session/instruction.test.ts
+@@ -64,6 +64,8 @@ const tmpWithFiles = (files: Record<string, string>) =>
+     return dir
+   })
+ 
++const sessionID = SessionID.make("session-instruction-test-1")
++
+ function loaded(filepath: string): SessionV1.WithParts[] {
+   const sessionID = SessionID.make("session-loaded-1")
+   const messageID = MessageID.make("msg_message-loaded-1")
+@@ -213,7 +215,7 @@ describe("Instruction.system", () => {
+         expect(paths.has(path.join(projectTmp, "AGENTS.md"))).toBe(true)
+         expect(paths.has(path.join(globalTmp, "AGENTS.md"))).toBe(true)
+ 
+-        const rules = yield* svc.system()
++        const rules = yield* svc.system(sessionID)
+         expect(rules).toHaveLength(2)
+         expect(rules[0]).toBe(`Instructions from: ${path.join(globalTmp, "AGENTS.md")}\n# Global Instructions`)
+         expect(rules[1]).toBe(`Instructions from: ${path.join(projectTmp, "AGENTS.md")}\n# Project Instructions`)
+@@ -231,13 +233,45 @@ describe("Instruction.system", () => {
+         const paths = yield* svc.systemPaths()
+         expect(paths.has(path.join(globalTmp, ".claude", "CLAUDE.md"))).toBe(false)
+         expect(paths.has(path.join(projectTmp, "CLAUDE.md"))).toBe(false)
+-        expect(yield* svc.system()).toEqual([])
++        expect(yield* svc.system(sessionID)).toEqual([])
+       }).pipe(
+         provideInstance(projectTmp),
+         provideInstruction({ home: globalTmp, config: globalTmp }, { disableClaudeCodePrompt: true }),
+       )
+     }),
+   )
++
++  it.live("runs the extra instructions command once per session", () =>
++    Effect.gen(function* () {
++      const dir = yield* tmpdirScoped()
++      const command = path.join(dir, "instructions")
++      yield* write(
++        command,
++        `#!/bin/sh\ncount=$(cat counter 2>/dev/null || true)\ncount=$((count + 1))\nprintf '%s' \"$count\" > counter\nprintf '%s:%s' \"$PWD\" \"$count\"`,
++      )
++      yield* Effect.promise(() => Bun.spawn(["chmod", "+x", command]).exited)
++
++      const previous = process.env.OPENCODE_EXTRA_INSTRUCTIONS_COMMAND
++      process.env.OPENCODE_EXTRA_INSTRUCTIONS_COMMAND = command
++      yield* Effect.addFinalizer(() =>
++        Effect.sync(() => {
++          if (previous === undefined) delete process.env.OPENCODE_EXTRA_INSTRUCTIONS_COMMAND
++          else process.env.OPENCODE_EXTRA_INSTRUCTIONS_COMMAND = previous
++        }),
++      )
++
++      yield* Effect.gen(function* () {
++        const svc = yield* Instruction.Service
++        const first = yield* svc.system(SessionID.make("session-instruction-command-1"))
++        const second = yield* svc.system(SessionID.make("session-instruction-command-1"))
++        const other = yield* svc.system(SessionID.make("session-instruction-command-2"))
++
++        expect(first[0]).toBe(`Instructions from command: ${command}\n${dir}:1`)
++        expect(second[0]).toBe(`Instructions from command: ${command}\n${dir}:1`)
++        expect(other[0]).toBe(`Instructions from command: ${command}\n${dir}:2`)
++      }).pipe(provideInstance(dir), provideInstruction({ home: dir, config: dir }))
++    }),
++  )
+ })
+ 
+ describe("Instruction.systemPaths global config", () => {

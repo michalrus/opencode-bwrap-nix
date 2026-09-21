@@ -4,7 +4,7 @@ set -o nounset
 set -o pipefail
 
 echo
-echo '## Environment'
+echo '## Environment (at conversation start)'
 echo
 echo "System: $(uname -a)"
 echo "Date: $(date --utc --rfc-email)"
@@ -16,13 +16,13 @@ echo "Nix shell: $(if [ -n "${IN_NIX_SHELL:-}" ]; then echo yes; else echo no; f
 echo "Direnv: $(if [ -n "${DIRENV_FILE:-}" ]; then echo yes; else echo no; fi)"
 
 echo
-echo '## Repository'
+echo '## Repository (at conversation start)'
 echo
 if git rev-parse --show-toplevel >/dev/null 2>&1; then
   onefetch --no-art --no-color-palette 2>&1 | ansifilter | sed -r '/^------+$/ d'
 fi
 
-echo '### Directory structure'
+echo '### Directory structure (at conversation start)'
 echo
 echo '```'
 git-tree-digest 150 3 | ansifilter
@@ -30,14 +30,14 @@ echo '```'
 
 if git rev-parse --show-toplevel >/dev/null 2>&1; then
   echo
-  echo '### Recent commits'
+  echo '### Recent commits (at conversation start)'
   echo
   git log --oneline -10 | ansifilter
 
   changes=$(git status --short)
   if [ -n "$changes" ]; then
     echo
-    echo '### Uncommitted changes'
+    echo '### Uncommitted changes (at conversation start)'
     echo
     git status --short | ansifilter
   fi
