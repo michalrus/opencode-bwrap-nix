@@ -130,16 +130,16 @@
     "opencode-notifier": {
       "flake": false,
       "locked": {
-        "lastModified": 1771864415,
-        "narHash": "sha256-Ne4X4q5LidbHax9HZu22qk/jQg2k+aA09c9E7cs4KR4=",
+        "lastModified": 1789955256,
+        "narHash": "sha256-8zc5KhjA2bKpxXm9d39SnZLJRj5wQ5M9jYkgRkIVxqU=",
         "owner": "mohak34",
         "repo": "opencode-notifier",
-        "rev": "c8f0d6ecaa7f4cf3b3078990f682fe38d992e411",
+        "rev": "ffa4e65b610f8ebf00b25f654ce69910e40f2f12",
         "type": "github"
       },
       "original": {
         "owner": "mohak34",
-        "ref": "v0.1.28",
+        "ref": "v0.3.0",
         "repo": "opencode-notifier",
         "type": "github"
       }

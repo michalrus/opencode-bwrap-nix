@@ -50,18 +50,24 @@
 
   # -- Notifier config -----------------------------------------------------
 
+  # Focus detection shells out to xdotool/hyprctl/swaymsg/gdbus and needs
+  # DISPLAY or WAYLAND_DISPLAY, none of which reach into the sandbox. Left on,
+  # it would hinge on whether the user happens to forward those via
+  # `extraFwdEnv`, so pin it off and keep notifications unconditional.
+  notifierConfigCommon = {
+    showSessionTitle = true;
+    suppressWhenFocused = false;
+    inherit (notifCfg) messages;
+  };
+
   notifierConfig =
-    if notifCfg.enable
-    then {
-      showSessionTitle = true;
-      inherit (notifCfg) messages;
-      sounds = lib.mapAttrs (name: _: "${soundsDir}/${name}.wav") convertedSounds;
-    }
-    else {
-      # Plugin is still mounted; give it a valid but silent config.
-      showSessionTitle = true;
-      inherit (notifCfg) messages;
-      sounds = {};
+    notifierConfigCommon
+    // {
+      sounds =
+        if notifCfg.enable
+        then lib.mapAttrs (name: _: "${soundsDir}/${name}.wav") convertedSounds
+        # Plugin is still mounted; give it a valid but silent config.
+        else {};
     };
 
   # -- Escape-hatch rules -------------------------------------------------
@@ -70,7 +76,16 @@
     [
       {
         note = "basic notification";
-        argv = ["${pkgs.libnotify}/bin/notify-send" "--" "*" "*"];
+        argv = [
+          "${pkgs.libnotify}/bin/notify-send"
+          "--app-name"
+          "opencode"
+          "--expire-time"
+          "*"
+          "--"
+          "*"
+          "*"
+        ];
       }
       {
         note = "notify-send version check";
@@ -80,6 +95,8 @@
         note = "notification with icon";
         argv = [
           "${pkgs.libnotify}/bin/notify-send"
+          "--app-name"
+          "opencode"
           "--icon"
           "${plugins.opencode-notifier}/logos/*.png"
           "--expire-time"

@@ -15,7 +15,7 @@
       flake = false;
     };
     opencode-notifier = {
-      url = "github:mohak34/opencode-notifier/v0.1.28";
+      url = "github:mohak34/opencode-notifier/v0.3.0";
       flake = false;
     };
     macos-system-sounds = {

@@ -347,6 +347,11 @@
 
       if [ -S /run/user/"$UID"/bwrap-escape-hatch.sock ]; then
         bwrap_opts+=( --ro-bind /run/user/"$UID"/bwrap-escape-hatch.sock /run/user/"$UID"/bwrap-escape-hatch.sock )
+        # opencode-notifier refuses to run notify-send unless this is set. The
+        # session bus itself stays outside the sandbox: our notify-send is an
+        # escape-hatch shim that talks to the host over the socket above, so
+        # the address only needs to be present, never reachable from here.
+        bwrap_opts+=( --setenv DBUS_SESSION_BUS_ADDRESS unix:path=/run/user/"$UID"/bus )
       fi
 
       if [ -f "$HOME"/.config/git/ignore ] ; then
