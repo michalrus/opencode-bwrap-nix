@@ -32,7 +32,6 @@
       (prev.patches or [])
       ++ [
         ./opencode--instructions_command.patch
-        ./opencode--cursor-beam.patch
         ./opencode--max-context-tokens.patch
       ];
   });
@@ -152,6 +151,10 @@
       "$schema" = "https://opencode.ai/tui.json";
       diff_style = "stacked";
       theme = "solarized";
+      cursor = {
+        style = "line";
+        blinking = true;
+      };
     }
   ];
 

@@ -1,8 +1,8 @@
 diff --git a/packages/opencode/src/provider/provider.ts b/packages/opencode/src/provider/provider.ts
-index 2142f8434..6a7cc4a87 100644
+index 867ef2ca2f..23f868e59c 100644
 --- a/packages/opencode/src/provider/provider.ts
 +++ b/packages/opencode/src/provider/provider.ts
-@@ -1291,6 +1291,11 @@ export const layer = Layer.effect(
+@@ -1402,6 +1402,11 @@ const layer = Layer.effect(
          const bridge = yield* EffectBridge.make()
          const cfg = yield* config.get()
          const modelsDev = yield* modelsDevSvc.get()
@@ -14,7 +14,7 @@ index 2142f8434..6a7cc4a87 100644
          const catalog = mapValues(modelsDev, fromModelsDevProvider)
          const database = mapValues(catalog, toPublicInfo)
  
-@@ -1566,6 +1571,12 @@ export const layer = Layer.effect(
+@@ -1679,6 +1684,12 @@ const layer = Layer.effect(
  
            for (const [modelID, model] of Object.entries(provider.models)) {
              model.api.id = model.api.id ?? model.id ?? modelID
@@ -24,14 +24,14 @@ index 2142f8434..6a7cc4a87 100644
 +                model.limit.input = Math.min(model.limit.input, model.limit.context)
 +              }
 +            }
+ 
              if (
                // These chat aliases are invalid for the special handling in the
-               // built-in providers below, but custom providers may support them.
 diff --git a/packages/opencode/test/provider/provider.test.ts b/packages/opencode/test/provider/provider.test.ts
-index 6edfc97ca..30be9d50f 100644
+index 32d4e3a39b..bfcadc9c7f 100644
 --- a/packages/opencode/test/provider/provider.test.ts
 +++ b/packages/opencode/test/provider/provider.test.ts
-@@ -1098,6 +1098,38 @@ it.instance(
+@@ -1257,6 +1257,38 @@ it.instance(
    },
  )
  

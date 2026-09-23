@@ -1,8 +1,7 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
-    # We take opencode 1.16.2 from:
-    nixpkgs-opencode.url = "github:NixOS/nixpkgs/f37978477bb931ceac4e730d201fe2a089c8c9f6";
+    nixpkgs-opencode.url = "github:NixOS/nixpkgs/99b76fd9b396189197d2ecce519ab6d7cd522ab5"; # opencode 1.18.31
     bun2nix = {
       url = "github:nix-community/bun2nix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -12,7 +11,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     opencode-anthropic-auth = {
-      url = "github:ex-machina-co/opencode-anthropic-auth/v1.8.1";
+      url = "github:ex-machina-co/opencode-anthropic-auth/v1.8.5";
       flake = false;
     };
     opencode-notifier = {
@@ -20,7 +19,7 @@
       flake = false;
     };
     macos-system-sounds = {
-      url = "github:extratone/macOSsystemsounds/f3e8dcd8d2318d099ade479ad1b9778ce4e65cc7";
+      url = "github:extratone/macOSsystemsounds";
       flake = false;
     };
   };
