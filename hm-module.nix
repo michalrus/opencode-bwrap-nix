@@ -122,7 +122,10 @@
         inherit (cfg.compaction) reserved;
       };
     providerJSON = cfg.provider;
-    extraEnv = cfg.extraEnv // {OPENCODE_MAX_CONTEXT_TOKENS = toString cfg.maxContextTokens;};
+    extraEnv =
+      cfg.extraEnv
+      // {OPENCODE_MAX_CONTEXT_TOKENS = toString cfg.maxContextTokens;}
+      // lib.optionalAttrs (cfg.databaseName != null) {OPENCODE_DB = cfg.databaseName;};
     commandPaths = cfg.commands;
     inherit (cfg) dataDirPrefix extraConfig extraTuiConfig extraEnvFiles extraPackages extraFwdEnv;
   };
@@ -264,6 +267,23 @@ in {
       description = "Maximum context and input token count that OpenCode uses for any model. Smaller model limits stay unchanged.";
     };
 
+    databaseName = mkOption {
+      type = types.nullOr types.str;
+      default = "opencode.db";
+      example = "opencode-stable.db";
+      description = ''
+        Name of the SQLite database file holding session history, relative to
+        OpenCode's data directory inside the sandbox.
+
+        OpenCode otherwise derives this name from the channel it was built
+        with, which made the file move to `opencode-stable.db` while nixpkgs
+        built against a `stable` channel that upstream never had. Pinning the
+        name keeps session history reachable across such changes.
+
+        Set to null to let OpenCode choose the name itself.
+      '';
+    };
+
     serena = {
       enable =
         mkEnableOption "Serena LSP/MCP integration (provides semantic code-navigation tools)"
@@ -365,6 +385,10 @@ in {
       {
         assertion = lib.all (name: builtins.match "[a-zA-Z0-9][a-zA-Z0-9_-]*" name != null) (builtins.attrNames cfg.commands);
         message = "programs.opencode-bwrap.commands: every command name must match [a-zA-Z0-9][a-zA-Z0-9_-]*";
+      }
+      {
+        assertion = cfg.databaseName == null || builtins.match "[a-zA-Z0-9][a-zA-Z0-9._-]*" cfg.databaseName != null;
+        message = "programs.opencode-bwrap.databaseName: must be a bare file name under OpenCode's data directory (no path separators)";
       }
     ];
 

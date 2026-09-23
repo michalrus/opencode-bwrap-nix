@@ -73,6 +73,7 @@ sandbox instead of starting an interactive shell.
 | `extraEnvFiles`            | attrs of strings | Env vars read from files in the persistent sandbox home         |
 | `extraFwdEnv`              | list of strings  | Host env vars forwarded into the sandbox                        |
 | `maxContextTokens`         | positive integer | Maximum model context and input tokens (default: 224\*1024)     |
+| `databaseName`             | string or null   | Session-history database file (default: `opencode.db`)          |
 | `treefmt.enable`           | bool             | Use treefmt as exclusive formatter (default: true)              |
 | `serena.enable`            | bool             | Serena MCP integration for code navigation (default: true)      |
 | `notifications.enable`     | bool             | Desktop notifications + sounds via escape hatch (default: true) |
