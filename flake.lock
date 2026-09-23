@@ -62,6 +62,23 @@
         "type": "github"
       }
     },
+    "macos-system-sounds": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1649929184,
+        "narHash": "sha256-7Qa/MpYykTIOWkAhhoV1rrhScCkQKgcQAmmR38PdNRc=",
+        "owner": "extratone",
+        "repo": "macOSsystemsounds",
+        "rev": "f3e8dcd8d2318d099ade479ad1b9778ce4e65cc7",
+        "type": "github"
+      },
+      "original": {
+        "owner": "extratone",
+        "repo": "macOSsystemsounds",
+        "rev": "f3e8dcd8d2318d099ade479ad1b9778ce4e65cc7",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1780952837,
@@ -91,6 +108,40 @@
         "owner": "NixOS",
         "repo": "nixpkgs",
         "rev": "f37978477bb931ceac4e730d201fe2a089c8c9f6",
+        "type": "github"
+      }
+    },
+    "opencode-anthropic-auth": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1778816671,
+        "narHash": "sha256-ScWQEEiwHQPt6MVzm3YKlC04/8eZ6HO5ZwOtqx84p0M=",
+        "owner": "ex-machina-co",
+        "repo": "opencode-anthropic-auth",
+        "rev": "f9947c0c97f28b91036e2fd27f552578d888dfbc",
+        "type": "github"
+      },
+      "original": {
+        "owner": "ex-machina-co",
+        "ref": "v1.8.1",
+        "repo": "opencode-anthropic-auth",
+        "type": "github"
+      }
+    },
+    "opencode-notifier": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1771864415,
+        "narHash": "sha256-Ne4X4q5LidbHax9HZu22qk/jQg2k+aA09c9E7cs4KR4=",
+        "owner": "mohak34",
+        "repo": "opencode-notifier",
+        "rev": "c8f0d6ecaa7f4cf3b3078990f682fe38d992e411",
+        "type": "github"
+      },
+      "original": {
+        "owner": "mohak34",
+        "ref": "v0.1.28",
+        "repo": "opencode-notifier",
         "type": "github"
       }
     },
@@ -147,8 +198,11 @@
     "root": {
       "inputs": {
         "bun2nix": "bun2nix",
+        "macos-system-sounds": "macos-system-sounds",
         "nixpkgs": "nixpkgs",
         "nixpkgs-opencode": "nixpkgs-opencode",
+        "opencode-anthropic-auth": "opencode-anthropic-auth",
+        "opencode-notifier": "opencode-notifier",
         "serena": "serena"
       }
     },

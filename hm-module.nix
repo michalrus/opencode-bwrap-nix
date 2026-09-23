@@ -15,7 +15,7 @@
   bun2nix = inputs.bun2nix.packages.${system}.default;
   serena = inputs.serena.packages.${system}.default;
 
-  plugins = pkgs.callPackage ./plugins {inherit bun2nix;};
+  plugins = pkgs.callPackage ./plugins {inherit inputs bun2nix;};
 
   escapeHatch = pkgs.callPackage ./bwrap-escape-hatch {};
 
@@ -26,12 +26,7 @@
   # -- Notification sounds -------------------------------------------------
 
   # Default sound source repository (only fetched when sounds are needed).
-  defaultSoundRepo = pkgs.fetchFromGitHub {
-    owner = "extratone";
-    repo = "macOSsystemsounds";
-    rev = "f3e8dcd8d2318d099ade479ad1b9778ce4e65cc7";
-    hash = "sha256-7Qa/MpYykTIOWkAhhoV1rrhScCkQKgcQAmmR38PdNRc=";
-  };
+  defaultSoundRepo = inputs.macos-system-sounds;
 
   # Convert any audio file to 44.1 kHz stereo WAV at build time.
   toWav = name: src:

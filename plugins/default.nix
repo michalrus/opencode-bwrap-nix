@@ -2,15 +2,10 @@
   pkgs,
   lib,
   bun2nix,
+  inputs,
 }: let
-  # See <https://github.com/ex-machina-co/opencode-anthropic-auth/pull/13>:
   opencode-anthropic-auth = let
-    src = pkgs.fetchFromGitHub {
-      owner = "ex-machina-co";
-      repo = "opencode-anthropic-auth";
-      rev = "v1.8.1";
-      hash = "sha256-ScWQEEiwHQPt6MVzm3YKlC04/8eZ6HO5ZwOtqx84p0M=";
-    };
+    src = inputs.opencode-anthropic-auth;
     # IFD: generate bun.nix from the upstream bun.lock using the bun2nix CLI.
     bun-nix = pkgs.runCommandLocal "opencode-anthropic-auth-bun.nix" {} ''
       ${lib.getExe bun2nix} --lock-file ${src}/bun.lock --output-file "$out"
@@ -18,7 +13,7 @@
   in
     pkgs.stdenv.mkDerivation rec {
       pname = "opencode-anthropic-auth";
-      version = "0.0.20-pull.13";
+      version = (builtins.fromJSON (builtins.readFile "${src}/package.json")).version;
 
       inherit src;
 
@@ -50,23 +45,16 @@
       '';
     };
 
-  opencode-notifier-src = pkgs.fetchFromGitHub {
-    owner = "mohak34";
-    repo = "opencode-notifier";
-    tag = "v0.1.28";
-    hash = "sha256-Ne4X4q5LidbHax9HZu22qk/jQg2k+aA09c9E7cs4KR4=";
-  };
-
   # IFD: generate bun.nix from the upstream bun.lock using the bun2nix CLI.
   opencode-notifier-bun-nix = pkgs.runCommandLocal "opencode-notifier-bun.nix" {} ''
-    ${lib.getExe bun2nix} --lock-file ${opencode-notifier-src}/bun.lock --output-file "$out"
+    ${lib.getExe bun2nix} --lock-file ${inputs.opencode-notifier}/bun.lock --output-file "$out"
   '';
 
   opencode-notifier = pkgs.stdenv.mkDerivation {
     pname = "opencode-notifier";
-    version = "0.1.28";
+    version = (builtins.fromJSON (builtins.readFile "${inputs.opencode-notifier}/package.json")).version;
 
-    src = opencode-notifier-src;
+    src = inputs.opencode-notifier;
 
     patches = [./opencode-notifier-notify-send-double-dash.patch];
 
@@ -98,22 +86,17 @@
   };
 
   opencode-notifier-sounds = let
-    macos-sounds = pkgs.fetchFromGitHub {
-      owner = "extratone";
-      repo = "macOSsystemsounds";
-      rev = "f3e8dcd8d2318d099ade479ad1b9778ce4e65cc7";
-      hash = "sha256-7Qa/MpYykTIOWkAhhoV1rrhScCkQKgcQAmmR38PdNRc=";
-    };
+    src = inputs.macos-system-sounds;
   in
     pkgs.runCommand "macos-sounds-wav" {
       nativeBuildInputs = [pkgs.ffmpeg-headless];
     } ''
       mkdir -p "$out"
-      ffmpeg -i "${macos-sounds}/m4r/Illuminate.m4r" "$out/Illuminate.wav"
-      ffmpeg -i "${macos-sounds}/m4r/Chord.m4r" "$out/Chord.wav"
-      ffmpeg -i "${macos-sounds}/aiff/Pop.aiff" "$out/Pop.wav"
-      ffmpeg -i "${macos-sounds}/m4r/Hillside.m4r" "$out/Hillside.wav"
-      ffmpeg -i "${macos-sounds}/aiff/Frog.aiff" "$out/Frog.wav"
+      ffmpeg -i "${src}/m4r/Illuminate.m4r" "$out/Illuminate.wav"
+      ffmpeg -i "${src}/m4r/Chord.m4r" "$out/Chord.wav"
+      ffmpeg -i "${src}/aiff/Pop.aiff" "$out/Pop.wav"
+      ffmpeg -i "${src}/m4r/Hillside.m4r" "$out/Hillside.wav"
+      ffmpeg -i "${src}/aiff/Frog.aiff" "$out/Frog.wav"
     '';
 
   opencode-notifier-config = {

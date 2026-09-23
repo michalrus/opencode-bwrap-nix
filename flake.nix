@@ -11,6 +11,18 @@
       url = "github:oraios/serena/main";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    opencode-anthropic-auth = {
+      url = "github:ex-machina-co/opencode-anthropic-auth/v1.8.1";
+      flake = false;
+    };
+    opencode-notifier = {
+      url = "github:mohak34/opencode-notifier/v0.1.28";
+      flake = false;
+    };
+    macos-system-sounds = {
+      url = "github:extratone/macOSsystemsounds/f3e8dcd8d2318d099ade479ad1b9778ce4e65cc7";
+      flake = false;
+    };
   };
 
   outputs = inputs: let

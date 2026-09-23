@@ -392,7 +392,7 @@
           commandSources)}
       ''}
 
-      # OpenCode plugins (pinned via fetchFromGitHub, mounted read-only)
+      # OpenCode plugins (pinned via Nix flake inputs, mounted read-only)
       bwrap_opts+=( --ro-bind ${opencode-plugins} "$HOME"/.config/opencode/plugins )
 
       # opencode-notifier config
