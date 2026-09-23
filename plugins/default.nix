@@ -85,40 +85,6 @@
     '';
   };
 
-  opencode-notifier-sounds = let
-    src = inputs.macos-system-sounds;
-  in
-    pkgs.runCommand "macos-sounds-wav" {
-      nativeBuildInputs = [pkgs.ffmpeg-headless];
-    } ''
-      mkdir -p "$out"
-      ffmpeg -i "${src}/m4r/Illuminate.m4r" "$out/Illuminate.wav"
-      ffmpeg -i "${src}/m4r/Chord.m4r" "$out/Chord.wav"
-      ffmpeg -i "${src}/aiff/Pop.aiff" "$out/Pop.wav"
-      ffmpeg -i "${src}/m4r/Hillside.m4r" "$out/Hillside.wav"
-      ffmpeg -i "${src}/aiff/Frog.aiff" "$out/Frog.wav"
-    '';
-
-  opencode-notifier-config = {
-    showSessionTitle = true;
-    messages = {
-      permission = "{sessionTitle}\n→ needs permission";
-      complete = "{sessionTitle}\n→ session finished";
-      subagent_complete = "{sessionTitle}\n→ subagent completed";
-      error = "{sessionTitle}\n→ error";
-      question = "{sessionTitle}\n→ question(s)";
-      user_cancelled = "{sessionTitle}\n→ cancelled by user";
-    };
-    sounds = {
-      permission = "${opencode-notifier-sounds}/Illuminate.wav";
-      complete = "${opencode-notifier-sounds}/Chord.wav";
-      subagent_complete = "${opencode-notifier-sounds}/Pop.wav";
-      error = "${opencode-notifier-sounds}/Hillside.wav";
-      question = "${opencode-notifier-sounds}/Illuminate.wav";
-      user_cancelled = "${opencode-notifier-sounds}/Frog.wav";
-    };
-  };
-
   opencode-plugins = pkgs.linkFarm "opencode-plugins" [
     {
       name = "opencode-anthropic-auth.js";
@@ -133,8 +99,6 @@ in {
   inherit
     opencode-anthropic-auth
     opencode-notifier
-    opencode-notifier-config
-    opencode-notifier-sounds
     opencode-plugins
     ;
 }

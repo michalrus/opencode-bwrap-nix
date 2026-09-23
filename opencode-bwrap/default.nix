@@ -19,7 +19,7 @@
   extraEnvFiles ? {},
   extraFwdEnv ? [],
   commandPaths ? {},
-  notifierConfig ? plugins.opencode-notifier-config,
+  notifierConfig ? {},
   treefmtEnabled ? true,
   compactionConfig ? {
     auto = true;
