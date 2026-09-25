@@ -1,0 +1,21 @@
+--- a/packages/core/src/flag/flag.ts
++++ b/packages/core/src/flag/flag.ts
+@@ -28,6 +28,7 @@
+   OPENCODE_DISABLE_AUTOCOMPACT: truthy("OPENCODE_DISABLE_AUTOCOMPACT"),
+   OPENCODE_DISABLE_MODELS_FETCH: truthy("OPENCODE_DISABLE_MODELS_FETCH"),
+   OPENCODE_DISABLE_MOUSE: truthy("OPENCODE_DISABLE_MOUSE"),
++  OPENCODE_DISABLE_PASTE_ATTACHMENTS: truthy("OPENCODE_DISABLE_PASTE_ATTACHMENTS"),
+   OPENCODE_FAKE_VCS: process.env["OPENCODE_FAKE_VCS"],
+   OPENCODE_SERVER_PASSWORD: process.env["OPENCODE_SERVER_PASSWORD"],
+   OPENCODE_SERVER_USERNAME: process.env["OPENCODE_SERVER_USERNAME"],
+--- a/packages/tui/src/component/prompt/index.tsx
++++ b/packages/tui/src/component/prompt/index.tsx
+@@ -1185,7 +1185,7 @@
+     const pastedContent = normalizedText.trim()
+     const filepath = pastedFilepath(pastedContent, terminalEnvironment.platform)
+     const isUrl = /^(https?):\/\//.test(filepath)
+-    if (!isUrl) {
++    if (!isUrl && !Flag.OPENCODE_DISABLE_PASTE_ATTACHMENTS) {
+       const attachment = await readLocalAttachment(filepath)
+       const filename = path.basename(filepath)
+       if (attachment?.type === "text") {

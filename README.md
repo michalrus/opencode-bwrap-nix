@@ -60,26 +60,27 @@ sandbox instead of starting an interactive shell.
 
 ## Home Manager options
 
-| Option                     | Type             | Description                                                     |
-| -------------------------- | ---------------- | --------------------------------------------------------------- |
-| `enable`                   | bool             | Enable the sandbox wrapper                                      |
-| `preamble`                 | path             | Instructions file mounted into the sandbox                      |
-| `preambleScripts`          | list             | Ordered executable packages or paths appended at runtime        |
-| `dataDirPrefix`            | string           | Relative path under `$HOME` for persistent sandbox state        |
-| `bashrc` / `zshrc`         | path             | Shell configs sourced inside the sandbox                        |
-| `commands`                 | attrs of paths   | Global command names and their Markdown source files            |
-| `extraPackages`            | list of packages | Additional packages on the sandbox PATH                         |
-| `extraEnv`                 | attrs of strings | Static env vars set in the sandbox                              |
-| `extraEnvFiles`            | attrs of strings | Env vars read from files in the persistent sandbox home         |
-| `extraFwdEnv`              | list of strings  | Host env vars forwarded into the sandbox                        |
-| `maxContextTokens`         | positive integer | Maximum model context and input tokens (default: 224\*1024)     |
-| `databaseName`             | string or null   | Session-history database file (default: `opencode.db`)          |
-| `treefmt.enable`           | bool             | Use treefmt as exclusive formatter (default: true)              |
-| `serena.enable`            | bool             | Serena MCP integration for code navigation (default: true)      |
-| `notifications.enable`     | bool             | Desktop notifications + sounds via escape hatch (default: true) |
-| `notifications.sounds.*`   | path or null     | Per-event sound files (converted to WAV at build time)          |
-| `notifications.messages.*` | string           | Per-event notification body templates                           |
-| `notifications.extraRules` | list of rules    | Additional escape-hatch allow-list entries                      |
+| Option                     | Type             | Description                                                       |
+| -------------------------- | ---------------- | ----------------------------------------------------------------- |
+| `enable`                   | bool             | Enable the sandbox wrapper                                        |
+| `preamble`                 | path             | Instructions file mounted into the sandbox                        |
+| `preambleScripts`          | list             | Ordered executable packages or paths appended at runtime          |
+| `dataDirPrefix`            | string           | Relative path under `$HOME` for persistent sandbox state          |
+| `bashrc` / `zshrc`         | path             | Shell configs sourced inside the sandbox                          |
+| `commands`                 | attrs of paths   | Global command names and their Markdown source files              |
+| `extraPackages`            | list of packages | Additional packages on the sandbox PATH                           |
+| `extraEnv`                 | attrs of strings | Static env vars set in the sandbox                                |
+| `extraEnvFiles`            | attrs of strings | Env vars read from files in the persistent sandbox home           |
+| `extraFwdEnv`              | list of strings  | Host env vars forwarded into the sandbox                          |
+| `maxContextTokens`         | positive integer | Maximum model context and input tokens (default: 224\*1024)       |
+| `pasteAttachments`         | bool             | Turn pasted image/SVG/PDF paths into attachments (default: false) |
+| `databaseName`             | string or null   | Session-history database file (default: `opencode.db`)            |
+| `treefmt.enable`           | bool             | Use treefmt as exclusive formatter (default: true)                |
+| `serena.enable`            | bool             | Serena MCP integration for code navigation (default: true)        |
+| `notifications.enable`     | bool             | Desktop notifications + sounds via escape hatch (default: true)   |
+| `notifications.sounds.*`   | path or null     | Per-event sound files (converted to WAV at build time)            |
+| `notifications.messages.*` | string           | Per-event notification body templates                             |
+| `notifications.extraRules` | list of rules    | Additional escape-hatch allow-list entries                        |
 
 ### Custom commands
 

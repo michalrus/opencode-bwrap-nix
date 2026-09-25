@@ -33,6 +33,7 @@
       ++ [
         ./opencode--instructions_command.patch
         ./opencode--max-context-tokens.patch
+        ./opencode--disable-paste-attachments.patch
       ];
   });
 

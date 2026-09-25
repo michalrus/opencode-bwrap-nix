@@ -142,6 +142,7 @@
     extraEnv =
       cfg.extraEnv
       // {OPENCODE_MAX_CONTEXT_TOKENS = toString cfg.maxContextTokens;}
+      // lib.optionalAttrs (!cfg.pasteAttachments) {OPENCODE_DISABLE_PASTE_ATTACHMENTS = "true";}
       // lib.optionalAttrs (cfg.databaseName != null) {OPENCODE_DB = cfg.databaseName;};
     commandPaths = cfg.commands;
     inherit (cfg) dataDirPrefix extraConfig extraTuiConfig extraEnvFiles extraPackages extraFwdEnv;
@@ -282,6 +283,17 @@ in {
       default = 224 * 1024;
       example = 200000;
       description = "Maximum context and input token count that OpenCode uses for any model. Smaller model limits stay unchanged.";
+    };
+
+    pasteAttachments = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Whether the TUI turns a pasted path to an existing image, SVG, or PDF
+        file into an inline attachment (shown as `[Image 1]`, `[SVG: name]`,
+        or `[PDF 1]`). When false, such paths stay plain text; use `@path` to
+        attach a file explicitly.
+      '';
     };
 
     databaseName = mkOption {
