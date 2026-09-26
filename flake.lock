@@ -144,6 +144,23 @@
         "type": "github"
       }
     },
+    "playwright-mcp": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1789774188,
+        "narHash": "sha256-O/Z/ufrtcbLInCnlZ1RhW2XsSTKQEn9KMUN+sC+DqdM=",
+        "owner": "microsoft",
+        "repo": "playwright-mcp",
+        "rev": "f1257a5a67aff872f947fae274759f7d54853862",
+        "type": "github"
+      },
+      "original": {
+        "owner": "microsoft",
+        "ref": "v0.0.82",
+        "repo": "playwright-mcp",
+        "type": "github"
+      }
+    },
     "pyproject-build-systems": {
       "inputs": {
         "nixpkgs": [
@@ -202,6 +219,7 @@
         "nixpkgs-opencode": "nixpkgs-opencode",
         "opencode-anthropic-auth": "opencode-anthropic-auth",
         "opencode-notifier": "opencode-notifier",
+        "playwright-mcp": "playwright-mcp",
         "serena": "serena"
       }
     },

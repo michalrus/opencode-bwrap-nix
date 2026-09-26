@@ -18,6 +18,9 @@ with a Home Manager module for declarative installation.
 - Optionally integrates [Serena](https://github.com/oraios/serena) as an
   MCP server for LSP-powered code navigation inside the sandbox (enabled
   by default).
+- Provides [Playwright MCP](https://github.com/microsoft/playwright-mcp) for
+  headless browser automation with Nixpkgs Chromium inside the sandbox
+  (enabled by default).
 - Supports [direnv](https://direnv.net/) + nix-direnv for per-project Nix
   dev shells.
 
@@ -77,10 +80,32 @@ sandbox instead of starting an interactive shell.
 | `databaseName`             | string or null   | Session-history database file (default: `opencode.db`)            |
 | `treefmt.enable`           | bool             | Use treefmt as exclusive formatter (default: true)                |
 | `serena.enable`            | bool             | Serena MCP integration for code navigation (default: true)        |
+| `playwright.enable`        | bool             | Playwright MCP with headless Nixpkgs Chromium (default: true)     |
 | `notifications.enable`     | bool             | Desktop notifications + sounds via escape hatch (default: true)   |
 | `notifications.sounds.*`   | path or null     | Per-event sound files (converted to WAV at build time)            |
 | `notifications.messages.*` | string           | Per-event notification body templates                             |
 | `notifications.extraRules` | list of rules    | Additional escape-hatch allow-list entries                        |
+
+### Playwright MCP
+
+`playwright.enable` defaults to `true`. The MCP server uses headless
+`pkgs.chromium`, not Google Chrome. Each MCP session has an isolated browser
+profile, so concurrent sessions do not share cookies or logins.
+
+Fontconfig uses the standard NixOS desktop font set: DejaVu, FreeFont,
+TeX Gyre, Liberation, GNU Unifont, and Noto Color Emoji. The fonts and
+configuration come from Nixpkgs, without access to host fonts. Websites can
+load their own web fonts.
+
+The source is pinned in `flake.lock`. Nix fetches the npm dependencies with a
+fixed hash and installs them offline in the build sandbox. No `npx` command or
+browser download is needed at runtime.
+
+To disable the integration:
+
+```nix
+programs.opencode-bwrap.playwright.enable = false;
+```
 
 ### Custom commands
 

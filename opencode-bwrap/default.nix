@@ -4,6 +4,7 @@
   lib,
   bun2nix,
   serena ? null,
+  playwright-mcp ? null,
   plugins,
   bwrap-escape-hatch,
   # Overridable by the home-manager module:
@@ -120,13 +121,43 @@
           ];
         };
       };
-      mcp = lib.optionalAttrs (serena != null) {
-        serena = {
-          type = "local";
-          command = ["serena" "start-mcp-server"];
-          enabled = true;
+      mcp =
+        lib.optionalAttrs (serena != null) {
+          serena = {
+            type = "local";
+            command = ["serena" "start-mcp-server"];
+            enabled = true;
+          };
+        }
+        // lib.optionalAttrs (playwright-mcp != null) {
+          playwright = {
+            type = "local";
+            command = [
+              (lib.getExe playwright-mcp)
+              "--executable-path"
+              (lib.getExe pkgs.chromium)
+              "--headless"
+              "--isolated"
+              "--sandbox"
+            ];
+            environment = {
+              PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
+              FONTCONFIG_FILE = toString (pkgs.makeFontsConf {
+                fontDirectories = with pkgs; [
+                  dejavu_fonts
+                  freefont_ttf
+                  gyre-fonts
+                  liberation_ttf
+                  unifont
+                  noto-fonts-color-emoji
+                ];
+                impureFontDirectories = [];
+                includes = ["${pkgs.fontconfig.out}/etc/fonts/conf.d"];
+              });
+            };
+            enabled = true;
+          };
         };
-      };
       autoupdate = false;
       provider = providerJSON;
       experimental = {
@@ -484,7 +515,7 @@
       };
       passthru = {
         bwrap-escape-hatch = bwrap-escape-hatch // {inherit escapeHatchShims;};
-        inherit plugins config tuiConfig;
+        inherit plugins config tuiConfig playwright-mcp;
       };
     };
   };

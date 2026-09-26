@@ -10,6 +10,10 @@
       url = "github:oraios/serena/main";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    playwright-mcp = {
+      url = "github:microsoft/playwright-mcp/v0.0.82";
+      flake = false;
+    };
     opencode-anthropic-auth = {
       url = "github:ex-machina-co/opencode-anthropic-auth/v1.8.5";
       flake = false;

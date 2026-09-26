@@ -15,6 +15,24 @@
   bun2nix = inputs.bun2nix.packages.${system}.default;
   serena = inputs.serena.packages.${system}.default;
 
+  playwright-mcp = pkgs.buildNpmPackage {
+    pname = "playwright-mcp";
+    inherit (builtins.fromJSON (builtins.readFile "${inputs.playwright-mcp}/package.json")) version;
+    src = inputs.playwright-mcp;
+    npmDepsHash = "sha256-9ezjwWu4tXgO868iDMT9Cst5Ke9ADISvbNbeEOJNmxw=";
+    npmFlags = ["--ignore-scripts"];
+    dontNpmBuild = true;
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
+
+    meta = {
+      description = "Playwright MCP server for browser automation";
+      homepage = "https://github.com/microsoft/playwright-mcp";
+      license = lib.licenses.asl20;
+      platforms = lib.platforms.linux;
+      mainProgram = "playwright-mcp";
+    };
+  };
+
   plugins = pkgs.callPackage ./plugins {inherit inputs bun2nix;};
 
   escapeHatch = pkgs.callPackage ./bwrap-escape-hatch {};
@@ -126,6 +144,10 @@
     serena =
       if cfg.serena.enable
       then serena
+      else null;
+    playwright-mcp =
+      if cfg.playwright.enable
+      then playwright-mcp
       else null;
     treefmtEnabled = cfg.treefmt.enable;
     bwrap-escape-hatch = escapeHatch;
@@ -316,6 +338,12 @@ in {
     serena = {
       enable =
         mkEnableOption "Serena LSP/MCP integration (provides semantic code-navigation tools)"
+        // {default = true;};
+    };
+
+    playwright = {
+      enable =
+        mkEnableOption "Playwright MCP with headless Nixpkgs Chromium and isolated browser sessions"
         // {default = true;};
     };
 
