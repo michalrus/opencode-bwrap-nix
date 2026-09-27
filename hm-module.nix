@@ -149,6 +149,11 @@
       if cfg.playwright.enable
       then playwright-mcp
       else null;
+    image-generation-mcp =
+      if cfg.imageGeneration.enable
+      then pkgs.callPackage ./image-generation-mcp {}
+      else null;
+    inherit (cfg) imageGeneration;
     treefmtEnabled = cfg.treefmt.enable;
     bwrap-escape-hatch = escapeHatch;
     preamblePath = cfg.preamble;
@@ -347,6 +352,21 @@ in {
         // {default = true;};
     };
 
+    imageGeneration = {
+      enable = mkEnableOption "image-generation MCP through CLIProxyAPI";
+      baseUrl = mkOption {
+        type = types.str;
+        default = "http://127.0.0.1:8317/v1";
+        example = "https://llm-proxy.example.com/v1";
+        description = "CLIProxyAPI base URL, with or without /v1. Use HTTPS except for a loopback proxy.";
+      };
+      apiKeyEnv = mkOption {
+        type = types.str;
+        default = "LLM_PROXY_KEY";
+        description = "Name of the API key environment variable in the sandbox. Supply its value through extraEnvFiles or extraFwdEnv, not Nix.";
+      };
+    };
+
     treefmt = {
       enable =
         mkEnableOption "treefmt as the exclusive formatter (disables all built-in formatters)"
@@ -419,6 +439,14 @@ in {
 
   config = mkIf cfg.enable {
     assertions = [
+      {
+        assertion = !cfg.imageGeneration.enable || builtins.match "[a-zA-Z_][a-zA-Z_0-9]*" cfg.imageGeneration.apiKeyEnv != null;
+        message = "programs.opencode-bwrap.imageGeneration.apiKeyEnv must be a valid environment variable name";
+      }
+      {
+        assertion = !cfg.imageGeneration.enable || builtins.match "https?://[^[:space:]?#@]+" cfg.imageGeneration.baseUrl != null;
+        message = "programs.opencode-bwrap.imageGeneration.baseUrl must be an HTTP(S) URL without credentials, a query, or a fragment";
+      }
       {
         assertion = lib.all (name: builtins.match "[a-zA-Z_][a-zA-Z_0-9]*" name != null) (builtins.attrNames cfg.extraEnv);
         message = "programs.opencode-bwrap.extraEnv: every key must be a valid POSIX variable name ([a-zA-Z_][a-zA-Z_0-9]*)";

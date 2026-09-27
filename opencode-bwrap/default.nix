@@ -5,6 +5,8 @@
   bun2nix,
   serena ? null,
   playwright-mcp ? null,
+  image-generation-mcp ? null,
+  imageGeneration ? {},
   plugins,
   bwrap-escape-hatch,
   # Overridable by the home-manager module:
@@ -156,6 +158,20 @@
               });
             };
             enabled = true;
+          };
+        }
+        // lib.optionalAttrs (image-generation-mcp != null) {
+          image_generation = {
+            type = "local";
+            command = [
+              (lib.getExe image-generation-mcp)
+              "--base-url"
+              imageGeneration.baseUrl
+              "--api-key-env"
+              imageGeneration.apiKeyEnv
+            ];
+            enabled = true;
+            timeout = 300000;
           };
         };
       autoupdate = false;
@@ -515,7 +531,7 @@
       };
       passthru = {
         bwrap-escape-hatch = bwrap-escape-hatch // {inherit escapeHatchShims;};
-        inherit plugins config tuiConfig playwright-mcp;
+        inherit plugins config tuiConfig playwright-mcp image-generation-mcp;
       };
     };
   };

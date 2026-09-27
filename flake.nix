@@ -76,6 +76,7 @@
         default = opencode-bwrap;
         opencode-bwrap = builtins.head hmEval.config.home.packages;
         bwrap-escape-hatch = (pkgs.callPackage ./bwrap-escape-hatch {}).package;
+        image-generation-mcp = pkgs.callPackage ./image-generation-mcp {};
         preamble-environment = pkgs.callPackage ./preamble/environment.nix {};
         preamble-project-instructions = pkgs.callPackage ./preamble/project-instructions.nix {};
       });
