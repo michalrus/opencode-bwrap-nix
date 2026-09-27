@@ -10,7 +10,7 @@ pkgs.rustPlatform.buildRustPackage {
   cargoHash = "sha256-toWi7AEp8e+JtJSUx190e9dP07bEiBu1QXUzN5BO72o=";
 
   meta = {
-    description = "Image-generation MCP for CLIProxyAPI with model discovery and art-direction guidance";
+    description = "Image generation and editing MCP for CLIProxyAPI with model discovery and art-direction guidance";
     license = lib.licenses.asl20;
     platforms = lib.platforms.linux;
     mainProgram = "image-generation-mcp";

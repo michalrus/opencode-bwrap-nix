@@ -17,6 +17,7 @@ use tokio::sync::Mutex;
 
 use crate::{
     catalog::{self, Catalog, Route},
+    input::InputImage,
     output::{self, Destination},
 };
 
@@ -47,6 +48,39 @@ pub struct Generate {
         description = "Complete art-directed prompt. First get a successful response from the guidance tool. Preserve every explicit user requirement. The server sends and saves this exact text."
     )]
     pub prompt: String,
+}
+
+#[derive(Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Modify {
+    #[schemars(
+        description = "Exact model slug with route openai returned by the guidance tool. Other providers are not supported by modify."
+    )]
+    pub model: String,
+    #[schemars(
+        description = "Absolute path to a PNG, JPEG, or WebP source image under 50 MB. The server uploads its actual bytes and never changes this file."
+    )]
+    pub input_path: String,
+    #[schemars(
+        description = "Absolute destination ending in .png, .jpg, .jpeg, or .webp. The parent must exist. Existing files are never overwritten."
+    )]
+    pub local_path: String,
+    #[schemars(
+        description = "Exact editing instructions: describe the changes and what must remain unchanged. First get a successful response from the guidance tool."
+    )]
+    pub prompt: String,
+    #[schemars(
+        description = "Final width in pixels, 64 to 4096. Provide both width and height, or omit both to use source dimensions. The server resizes and center-crops if needed."
+    )]
+    pub width: Option<u32>,
+    #[schemars(
+        description = "Final height in pixels, 64 to 4096. Provide both width and height, or omit both to use source dimensions. Aspect ratio must be between 1:8 and 8:1."
+    )]
+    pub height: Option<u32>,
+    #[schemars(
+        description = "Optional absolute path to a PNG mask under 4 MB with an alpha channel and source-matching dimensions. Fully transparent pixels mark the area to edit."
+    )]
+    pub mask_path: Option<String>,
 }
 
 #[derive(Clone)]
@@ -140,7 +174,7 @@ impl Proxy {
         while let Some(chunk) = response
             .chunk()
             .await
-            .context("Cannot read API response; do not automatically repeat generation")?
+            .context("Cannot read API response. Do not automatically repeat the request")?
         {
             if body.len() + chunk.len() > limit {
                 if !status.is_success() {
@@ -244,23 +278,122 @@ impl Proxy {
         .await
         .context("Image save worker failed")?
     }
+
+    pub async fn modify(&self, args: Modify) -> Result<Value> {
+        validate_prompt_model(&args.prompt, &args.model)?;
+        ensure!(
+            args.model
+                .rsplit('/')
+                .next()
+                .is_some_and(|model| model.starts_with("gpt-image-")),
+            "modify supports only OpenAI GPT image models with route openai"
+        );
+        ensure!(
+            args.width.is_some() == args.height.is_some(),
+            "Provide both width and height, or omit both to use source dimensions"
+        );
+        if let (Some(width), Some(height)) = (args.width, args.height) {
+            validate_dimensions(width, height)?;
+        }
+        let destination = Destination::prepare(Path::new(&args.local_path))?;
+        let (output, mut request, mut metadata) =
+            tokio::task::spawn_blocking(move || prepare_modification(args))
+                .await
+                .context("Image input worker failed")??;
+        let catalog = self.list_models().await?;
+        let model = catalog.models.iter().find(|item| item.model == output.model || item.account_ids.contains(&output.model))
+            .context("Model is not in the live image catalog. Call the guidance tool and use an exact returned slug.")?;
+        ensure!(
+            model.route == Some(Route::Openai),
+            "modify supports only OpenAI GPT image models with route openai"
+        );
+        let response = self
+            .request_json(
+                self.client
+                    .post(self.base.join("images/edits")?)
+                    .header(AUTHORIZATION, self.auth.clone())
+                    .json(&request),
+                MAX_RESPONSE,
+                true,
+            )
+            .await?;
+        request.as_object_mut().unwrap().remove("images");
+        request.as_object_mut().unwrap().remove("mask");
+        metadata["request"] = request;
+        metadata["response_model"] = json!(response.get("model"));
+        let decoded = output::decode(&response)?;
+        tokio::task::spawn_blocking(move || {
+            destination.save(decoded, output.width, output.height, metadata)
+        })
+        .await
+        .context("Image save worker failed")?
+    }
+}
+
+fn prepare_modification(args: Modify) -> Result<(Generate, Value, Value)> {
+    let input = InputImage::load(Path::new(&args.input_path), None)?;
+    let mask = args
+        .mask_path
+        .as_ref()
+        .map(|path| InputImage::load(Path::new(path), Some(&input)))
+        .transpose()?;
+    let output = Generate {
+        model: args.model,
+        local_path: args.local_path,
+        prompt: args.prompt,
+        width: args.width.unwrap_or(input.width),
+        height: args.height.unwrap_or(input.height),
+    };
+    validate(&output)
+        .context("Invalid modification output. Supply width and height within the output limits")?;
+    let mut request = generation_request(&output, Route::Openai);
+    request.as_object_mut().unwrap().remove("response_format");
+    request["images"] = json!([{"image_url": input.data_url()}]);
+    let model = output.model.rsplit('/').next().unwrap_or(&output.model);
+    if model == "gpt-image-1" || model == "gpt-image-1.5" || model.starts_with("gpt-image-1.5-") {
+        request["input_fidelity"] = json!("high");
+    }
+    if args.width.is_none() && args.height.is_none() {
+        request["size"] = json!("auto");
+    }
+    if let Some(mask) = &mask {
+        request["mask"] = json!({"image_url": mask.data_url()});
+    }
+    ensure!(
+        serde_json::to_vec(&request)?.len() <= MAX_RESPONSE,
+        "Image edit request exceeds the 64 MiB proxy limit; use smaller input files"
+    );
+    let metadata = json!({
+        "operation": "modify", "input": input.metadata(), "mask": mask.as_ref().map(InputImage::metadata),
+        "requested_dimensions": {"width": output.width, "height": output.height},
+    });
+    Ok((output, request, metadata))
 }
 
 pub fn validate(args: &Generate) -> Result<()> {
+    validate_dimensions(args.width, args.height)?;
+    validate_prompt_model(&args.prompt, &args.model)
+}
+
+fn validate_dimensions(width: u32, height: u32) -> Result<()> {
     ensure!(
-        (64..=4096).contains(&args.width) && (64..=4096).contains(&args.height),
+        (64..=4096).contains(&width) && (64..=4096).contains(&height),
         "width and height must be between 64 and 4096 pixels"
     );
     ensure!(
-        args.width <= args.height * 8 && args.height <= args.width * 8,
+        width <= height * 8 && height <= width * 8,
         "Aspect ratio must be between 1:8 and 8:1"
     );
+    Ok(())
+}
+
+fn validate_prompt_model(prompt: &str, model: &str) -> Result<()> {
     ensure!(
-        !args.prompt.trim().is_empty() && args.prompt.len() <= 32000,
+        !prompt.trim().is_empty() && prompt.len() <= 32000,
         "prompt must contain 1 to 32000 bytes"
     );
     ensure!(
-        !args.model.trim().is_empty() && args.model.len() <= 256,
+        !model.trim().is_empty() && model.len() <= 256,
         "Invalid model slug"
     );
     Ok(())
@@ -340,6 +473,232 @@ mod tests {
             height: 1024,
             prompt: "exact fox prompt".into(),
         }
+    }
+
+    fn edit_args(input_path: &Path, local_path: &Path) -> Modify {
+        Modify {
+            model: "gpt-image-test".into(),
+            input_path: input_path.to_str().unwrap().into(),
+            local_path: local_path.to_str().unwrap().into(),
+            prompt: "Change only the coat to red.\nKeep the face and background unchanged.".into(),
+            width: None,
+            height: None,
+            mask_path: None,
+        }
+    }
+
+    fn edit_source(path: &Path, width: u32, height: u32) {
+        image::RgbImage::from_pixel(width, height, image::Rgb([80, 160, 200]))
+            .save(path)
+            .unwrap();
+    }
+
+    #[test]
+    fn modification_request_preserves_bytes_and_selects_model_fidelity() {
+        let directory = tempfile::tempdir().unwrap();
+        let input = directory.path().join("source.jpg");
+        edit_source(&input, 128, 96);
+        let bytes = std::fs::read(&input).unwrap();
+        let expected = format!("data:image/jpeg;base64,{}", STANDARD.encode(&bytes));
+        for (model, fidelity) in [
+            ("gpt-image-1", Some("high")),
+            ("gpt-image-1.5", Some("high")),
+            ("account/gpt-image-1.5-2025-12-16", Some("high")),
+            ("gpt-image-1-mini", None),
+            ("gpt-image-2", None),
+            ("account/gpt-image-2-2026-04-21", None),
+            ("gpt-image-2.5-flare", None),
+        ] {
+            let mut args = edit_args(&input, &directory.path().join("output.png"));
+            args.model = model.into();
+            let (output, request, metadata) = prepare_modification(args.clone()).unwrap();
+            assert_eq!((output.width, output.height), (128, 96));
+            assert_eq!(request["images"], json!([{"image_url": expected}]));
+            assert_eq!(request["model"], model);
+            assert_eq!(request["prompt"], args.prompt);
+            assert_eq!(request["size"], "auto");
+            assert_eq!(
+                request.get("input_fidelity").and_then(Value::as_str),
+                fidelity
+            );
+            assert!(request.get("response_format").is_none());
+            assert!(request.get("mask").is_none());
+            assert_eq!(metadata["operation"], "modify");
+            assert_eq!(metadata["input"]["path"], input.to_str().unwrap());
+            assert_eq!(metadata["input"]["bytes"], bytes.len());
+            assert!(metadata["mask"].is_null());
+        }
+        assert_eq!(std::fs::read(input).unwrap(), bytes);
+    }
+
+    #[test]
+    fn modification_respects_output_dimensions_and_keeps_masks_unmodified() {
+        let directory = tempfile::tempdir().unwrap();
+        let input = directory.path().join("source.png");
+        edit_source(&input, 128, 96);
+        let mask = directory.path().join("mask.png");
+        image::RgbaImage::new(128, 96).save(&mask).unwrap();
+        let mask_bytes = std::fs::read(&mask).unwrap();
+        let mut args = edit_args(&input, &directory.path().join("output.png"));
+        args.mask_path = Some(mask.to_str().unwrap().into());
+        args.width = Some(64);
+        args.height = Some(128);
+        let (output, request, metadata) = prepare_modification(args.clone()).unwrap();
+        assert_eq!((output.width, output.height), (64, 128));
+        assert_eq!(request["size"], "1024x1536");
+        assert_eq!(
+            request["mask"]["image_url"],
+            format!("data:image/png;base64,{}", STANDARD.encode(&mask_bytes))
+        );
+        assert_eq!(metadata["mask"]["width"], 128);
+        assert_eq!(metadata["mask"]["height"], 96);
+        assert_eq!(std::fs::read(&mask).unwrap(), mask_bytes);
+        edit_source(&input, 4097, 64);
+        args.mask_path = None;
+        args.width = None;
+        args.height = None;
+        assert!(prepare_modification(args.clone()).is_err());
+        args.width = Some(512);
+        args.height = Some(64);
+        assert!(prepare_modification(args).is_ok());
+    }
+
+    #[tokio::test]
+    async fn modification_uploads_images_and_saves_without_embedding_them_in_metadata() {
+        let server = MockServer::start().await;
+        let proxy = setup(&server).await;
+        let directory = tempfile::tempdir().unwrap();
+        let input = directory.path().join("source.webp");
+        edit_source(&input, 128, 96);
+        let bytes = std::fs::read(&input).unwrap();
+        let output_path = directory.path().join("output.png");
+        let response = output::tests::fixture(image::ImageFormat::Jpeg);
+        Mock::given(method("POST"))
+            .and(path("/v1/images/edits"))
+            .and(header("authorization", "Bearer test-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": [{"b64_json": STANDARD.encode(&response)}],
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let args = edit_args(&input, &output_path);
+        let result = proxy.modify(args.clone()).await.unwrap();
+        assert_eq!(result["width"], 128);
+        assert_eq!(result["height"], 96);
+        assert_eq!(
+            std::fs::read(result["original_path"].as_str().unwrap()).unwrap(),
+            response
+        );
+        assert_eq!(std::fs::read(&input).unwrap(), bytes);
+        let sidecar_bytes = std::fs::read(result["prompt_file"].as_str().unwrap()).unwrap();
+        let metadata: Value = serde_json::from_slice(&sidecar_bytes).unwrap();
+        assert_eq!(metadata["request"]["prompt"], args.prompt);
+        assert_eq!(metadata["input"]["path"], input.to_str().unwrap());
+        assert_eq!(metadata["input"]["mime_type"], "image/webp");
+        assert!(metadata["request"].get("images").is_none());
+        assert!(metadata["request"].get("mask").is_none());
+        assert!(!String::from_utf8(sidecar_bytes).unwrap().contains("base64"));
+        let requests = server.received_requests().await.unwrap();
+        let request = requests
+            .iter()
+            .find(|request| request.method == "POST")
+            .unwrap()
+            .body_json::<Value>()
+            .unwrap();
+        assert_eq!(
+            request["images"][0]["image_url"],
+            format!("data:image/webp;base64,{}", STANDARD.encode(&bytes))
+        );
+        assert_eq!(request["prompt"], args.prompt);
+        assert!(proxy.modify(args).await.is_err());
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 4);
+    }
+
+    #[tokio::test]
+    async fn invalid_modifications_fail_before_any_api_requests() {
+        let server = MockServer::start().await;
+        let proxy = Proxy::new(&server.uri(), "test-key".into()).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let input = directory.path().join("source.png");
+        edit_source(&input, 128, 96);
+        let output = directory.path().join("output.png");
+        let args = edit_args(&input, &output);
+        let cases = [
+            json!({"model": "gemini-image-test"}),
+            json!({"model": ""}),
+            json!({"prompt": " "}),
+            json!({"width": 64}),
+            json!({"height": 64}),
+            json!({"width": 0, "height": 64}),
+            json!({"width": 4097, "height": 64}),
+            json!({"width": 64, "height": 4096}),
+            json!({"input_path": "relative.png"}),
+            json!({"input_path": directory.path()}),
+            json!({"input_path": directory.path().join("missing.png")}),
+            json!({"mask_path": input}),
+            json!({"local_path": "relative.png"}),
+            json!({"local_path": input}),
+            json!({"local_path": directory.path().join("output.gif")}),
+        ];
+        for changes in cases {
+            let mut value = serde_json::to_value(&args).unwrap();
+            value
+                .as_object_mut()
+                .unwrap()
+                .extend(changes.as_object().unwrap().clone());
+            let request: Modify = serde_json::from_value(value).unwrap();
+            assert!(proxy.modify(request).await.is_err(), "{changes}");
+            assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+        }
+        for suffix in [
+            ".prompt.json",
+            ".original.png",
+            ".original.jpg",
+            ".original.webp",
+        ] {
+            let conflict = directory.path().join(format!("output.png{suffix}"));
+            std::os::unix::fs::symlink(directory.path().join("missing"), &conflict).unwrap();
+            assert!(proxy.modify(args.clone()).await.is_err());
+            assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 2);
+            std::fs::remove_file(conflict).unwrap();
+        }
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn modification_rejects_unknown_models_and_never_retries_failed_edits() {
+        let server = MockServer::start().await;
+        let proxy = setup(&server).await;
+        let directory = tempfile::tempdir().unwrap();
+        let input = directory.path().join("source.png");
+        edit_source(&input, 128, 96);
+        let bytes = std::fs::read(&input).unwrap();
+        let mut args = edit_args(&input, &directory.path().join("output.png"));
+        args.model = "gpt-image-unknown".into();
+        assert!(
+            proxy
+                .modify(args.clone())
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("live image catalog")
+        );
+        args.model = "gpt-image-test".into();
+        Mock::given(method("POST"))
+            .and(path("/v1/images/edits"))
+            .respond_with(
+                ResponseTemplate::new(429)
+                    .set_body_json(json!({"error": {"message": "test-key quota exceeded"}})),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let error = proxy.modify(args).await.unwrap_err().to_string();
+        assert!(error.contains("429"));
+        assert!(!error.contains("test-key"));
+        assert_eq!(std::fs::read(&input).unwrap(), bytes);
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
     }
 
     #[test]
@@ -749,7 +1108,7 @@ mod tests {
                 .map(|tool| tool["name"].as_str().unwrap())
                 .collect();
             names.sort_unstable();
-            assert_eq!(names, ["generate", "guidance"]);
+            assert_eq!(names, ["generate", "guidance", "modify"]);
             for id in [3, 4] {
                 let response = rpc(&mut writer, &mut reader, json!({
                     "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": "guidance", "arguments": {}}

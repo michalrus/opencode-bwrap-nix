@@ -1,4 +1,5 @@
 mod catalog;
+mod input;
 mod output;
 mod proxy;
 
@@ -12,12 +13,12 @@ use rmcp::{
 };
 use serde_json::{Value, json};
 
-use proxy::{Generate, Proxy};
+use proxy::{Generate, Modify, Proxy};
 
 const GUIDANCE: &str = include_str!("../guidance.md");
 
 #[derive(Parser)]
-#[command(about = "Generate local image assets through a CLIProxyAPI MCP server")]
+#[command(about = "Generate and modify local image assets through a CLIProxyAPI MCP server")]
 struct Args {
     #[arg(long, help = "CLIProxyAPI base URL, with or without /v1")]
     base_url: String,
@@ -50,7 +51,7 @@ impl ImageServer {
     }
 
     #[tool(
-        description = "Get available models and prompt-refinement guidance. Must succeed before image generation. On failure, stop and report the error.",
+        description = "Get available models and prompt-refinement guidance. Must succeed before image generation or modification. On failure, stop and report the error.",
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     async fn guidance(&self) -> CallToolResult {
@@ -78,13 +79,25 @@ impl ImageServer {
     async fn generate(&self, Parameters(args): Parameters<Generate>) -> CallToolResult {
         self.result(self.proxy.generate(args).await)
     }
+
+    #[tool(
+        description = "Modify a local image with an OpenAI GPT image model using the actual source bytes and optional mask. First get guidance. Never overwrites the input or output. One paid request, no automatic retry. Unrelated pixels may change.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false
+        )
+    )]
+    async fn modify(&self, Parameters(args): Parameters<Modify>) -> CallToolResult {
+        self.result(self.proxy.modify(args).await)
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for ImageServer {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
-            .with_instructions("Before the first image generation, call the guidance tool. If it fails, stop and report the error. Do not guess a model or call the generate tool without a successful guidance response. Use the returned models and guidance to prepare the generate call. Do not orchestrate shell scripts. Report success only after the generate tool returns a saved path.")
+            .with_instructions("Before image generation or modification, call the guidance tool. If it fails, stop and report the error. Do not guess a model or call generate or modify without successful guidance. Use generate for new images and modify for edits to a local image. The modify tool supports only models with route openai. Do not orchestrate shell scripts. Report success only after the tool returns a saved path.")
     }
 }
 
@@ -107,11 +120,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn exposes_exactly_two_tools_and_five_generation_arguments() {
+    fn exposes_three_tools_with_generation_and_modification_arguments() {
         let tools = ImageServer::tool_router().list_all();
         let mut names: Vec<_> = tools.iter().map(|tool| tool.name.as_ref()).collect();
         names.sort_unstable();
-        assert_eq!(names, ["generate", "guidance"]);
+        assert_eq!(names, ["generate", "guidance", "modify"]);
         let guidance = tools.iter().find(|tool| tool.name == "guidance").unwrap();
         assert!(
             guidance
@@ -147,6 +160,24 @@ mod tests {
                 .unwrap()
                 .contains("guidance tool")
         );
+        let modification = tools.iter().find(|tool| tool.name == "modify").unwrap();
+        assert_eq!(
+            modification.input_schema["properties"]
+                .as_object()
+                .unwrap()
+                .len(),
+            7
+        );
+        let mut required: Vec<_> = modification.input_schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect();
+        required.sort_unstable();
+        assert_eq!(required, ["input_path", "local_path", "model", "prompt"]);
+        assert_eq!(modification.input_schema["additionalProperties"], false);
         assert!(GUIDANCE.contains("Preserve every explicit user requirement"));
+        assert!(GUIDANCE.contains("actual source image"));
     }
 }
