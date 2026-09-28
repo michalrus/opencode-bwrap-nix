@@ -1,4 +1,5 @@
 use std::{
+    ffi::{OsStr, OsString},
     fs,
     io::{Cursor, Write},
     path::{Path, PathBuf},
@@ -6,16 +7,17 @@ use std::{
 
 use anyhow::{Context, Result, bail, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
-use image::{GenericImageView, ImageFormat, ImageReader, imageops::FilterType};
+use image::{GenericImageView, ImageFormat, ImageReader};
 use serde_json::{Value, json};
 use tempfile::{Builder, NamedTempFile, TempPath};
 
+const EXTENSIONS: [&str; 4] = ["png", "jpg", "jpeg", "webp"];
+
 pub struct Destination {
-    path: PathBuf,
-    sidecar: PathBuf,
-    format: ImageFormat,
+    parent: PathBuf,
+    stem: OsString,
+    requested_extension: String,
     image_file: NamedTempFile,
-    original_file: NamedTempFile,
     prompt_file: NamedTempFile,
     _reservation: TempPath,
 }
@@ -90,16 +92,17 @@ fn require_absent(path: &Path) -> Result<()> {
     }
 }
 
-fn original_path(path: &Path, format: ImageFormat) -> Result<PathBuf> {
-    let extension = match format {
-        ImageFormat::Png => "png",
-        ImageFormat::Jpeg => "jpg",
-        ImageFormat::WebP => "webp",
-        _ => bail!("Unsupported provider image format"),
-    };
-    let mut original = path.as_os_str().to_os_string();
-    original.push(format!(".original.{extension}"));
-    Ok(PathBuf::from(original))
+fn variant_path(parent: &Path, stem: &OsStr, extension: &str) -> PathBuf {
+    let mut name = stem.to_os_string();
+    name.push(".");
+    name.push(extension);
+    parent.join(name)
+}
+
+fn sidecar_path(path: &Path) -> PathBuf {
+    let mut sidecar = path.as_os_str().to_os_string();
+    sidecar.push(".prompt.json");
+    PathBuf::from(sidecar)
 }
 
 impl Destination {
@@ -112,145 +115,83 @@ impl Destination {
             .context("Output directory must already exist")?;
         let name = path.file_name().context("Output needs a file name")?;
         let path = parent.join(name);
-        let format = match path
+        let requested_extension = path
             .extension()
             .and_then(|ext| ext.to_str())
             .map(str::to_ascii_lowercase)
-            .as_deref()
-        {
-            Some("png") => ImageFormat::Png,
-            Some("jpg" | "jpeg") => ImageFormat::Jpeg,
-            Some("webp") => ImageFormat::WebP,
-            _ => bail!("local_path must end in .png, .jpg, .jpeg, or .webp"),
-        };
-        let mut sidecar = path.as_os_str().to_os_string();
-        sidecar.push(".prompt.json");
-        let sidecar = PathBuf::from(sidecar);
-        require_absent(&path)?;
-        require_absent(&sidecar)?;
-        for format in [ImageFormat::Png, ImageFormat::Jpeg, ImageFormat::WebP] {
-            require_absent(&original_path(&path, format)?)?;
-        }
-        let mut lock = path.as_os_str().to_os_string();
-        lock.push(".image-generation.lock");
-        let lock = PathBuf::from(lock);
+            .filter(|extension| EXTENSIONS.contains(&extension.as_str()))
+            .context("local_path must end in .png, .jpg, .jpeg, or .webp")?;
+        let stem = path
+            .file_stem()
+            .context("Output needs a file name")?
+            .to_os_string();
+        let mut lock_name = stem.clone();
+        lock_name.push(".image-generation.lock");
+        let lock = parent.join(lock_name);
         fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&lock)
             .context("Cannot reserve output path. Another generation may be in progress.")?;
         let reservation = TempPath::try_from_path(lock)?;
+        require_absent(&path)?;
+        require_absent(&sidecar_path(&path))?;
+        for extension in EXTENSIONS {
+            let candidate = variant_path(&parent, &stem, extension);
+            require_absent(&candidate)?;
+            require_absent(&sidecar_path(&candidate))?;
+        }
         let image_file = Builder::new()
             .prefix(".image-generation-")
-            .tempfile_in(&parent)?;
-        let original_file = Builder::new()
-            .prefix(".image-original-")
             .tempfile_in(&parent)?;
         let prompt_file = Builder::new()
             .prefix(".image-prompt-")
             .tempfile_in(&parent)?;
         Ok(Self {
-            path,
-            sidecar,
-            format,
+            parent,
+            stem,
+            requested_extension,
             image_file,
-            original_file,
             prompt_file,
             _reservation: reservation,
         })
     }
 
-    pub fn save(
-        mut self,
-        decoded: Decoded,
-        width: u32,
-        height: u32,
-        mut metadata: Value,
-    ) -> Result<Value> {
-        ensure!(
-            (1..=4096).contains(&width) && (1..=4096).contains(&height),
-            "Output dimensions must be between 1 and 4096 pixels"
-        );
-        let source_format = image::guess_format(&decoded.bytes).context("Unknown image format")?;
-        let original_path = original_path(&self.path, source_format)?;
-        let mut reader = ImageReader::with_format(Cursor::new(&decoded.bytes), source_format);
+    pub fn save(mut self, decoded: Decoded, mut metadata: Value) -> Result<Value> {
+        let format = image::guess_format(&decoded.bytes).context("Unknown image format")?;
+        let extension = match format {
+            ImageFormat::Png => "png",
+            ImageFormat::WebP => "webp",
+            ImageFormat::Jpeg if self.requested_extension == "jpeg" => "jpeg",
+            ImageFormat::Jpeg => "jpg",
+            _ => bail!("Unsupported provider image format"),
+        };
+        let mut reader = ImageReader::with_format(Cursor::new(&decoded.bytes), format);
         let mut limits = image::Limits::default();
         limits.max_image_width = Some(16384);
         limits.max_image_height = Some(16384);
         limits.max_alloc = Some(512 * 1024 * 1024);
         reader.limits(limits);
-        let mut image = reader
+        let image = reader
             .decode()
             .context("Provider returned an invalid image")?;
-        let source_dimensions = image.dimensions();
-        let (source_width, source_height) = source_dimensions;
-        ensure!(
-            source_width > 0 && source_height > 0,
-            "Empty provider image"
-        );
-        let resized = source_dimensions != (width, height);
-        if resized {
-            let (crop_width, crop_height) = if u64::from(source_width) * u64::from(height)
-                > u64::from(source_height) * u64::from(width)
-            {
-                (
-                    ((u64::from(source_height) * u64::from(width)) / u64::from(height)).max(1)
-                        as u32,
-                    source_height,
-                )
-            } else {
-                (
-                    source_width,
-                    ((u64::from(source_width) * u64::from(height)) / u64::from(width)).max(1)
-                        as u32,
-                )
-            };
-            if (crop_width, crop_height) != source_dimensions {
-                image = image.crop_imm(
-                    (source_width - crop_width) / 2,
-                    (source_height - crop_height) / 2,
-                    crop_width,
-                    crop_height,
-                );
-            }
-            image = image.resize_exact(width, height, FilterType::Lanczos3);
-        }
-        let converted = source_format != self.format;
-        if !resized && !converted {
-            self.image_file.write_all(&decoded.bytes)?;
-        } else if self.format == ImageFormat::Jpeg {
-            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut self.image_file, 95)
-                .encode_image(&image.to_rgb8())?;
-        } else {
-            image.write_to(&mut self.image_file, self.format)?;
-        }
-        self.original_file.write_all(&decoded.bytes)?;
-        let mime = self.format.to_mime_type();
+        let (width, height) = image.dimensions();
+        ensure!(width > 0 && height > 0, "Empty provider image");
+        let path = variant_path(&self.parent, &self.stem, extension);
+        let sidecar = sidecar_path(&path);
+        let mime = format.to_mime_type();
+        let bytes = decoded.bytes.len();
+        self.image_file.write_all(&decoded.bytes)?;
         metadata["revised_prompt"] = json!(decoded.revised_prompt);
-        metadata["original"] = json!({
-            "path": original_path,
-            "mime_type": source_format.to_mime_type(),
-            "width": source_width, "height": source_height,
-            "bytes": decoded.bytes.len(),
-        });
         metadata["output"] = json!({
-            "path": self.path, "mime_type": mime, "width": width, "height": height,
-            "source_width": source_dimensions.0, "source_height": source_dimensions.1,
-            "source_mime_type": source_format.to_mime_type(),
-            "resized": resized, "converted": converted,
-            "resize_method": if resized { Some("lanczos3_center_crop") } else { None },
+            "path": path, "mime_type": mime, "width": width, "height": height, "bytes": bytes,
         });
         serde_json::to_writer_pretty(&mut self.prompt_file, &metadata)?;
         self.prompt_file.write_all(b"\n")?;
         self.image_file.as_file().sync_all()?;
-        self.original_file.as_file().sync_all()?;
         self.prompt_file.as_file().sync_all()?;
-        let bytes = self.image_file.as_file().metadata()?.len();
         let Self {
-            path,
-            sidecar,
             image_file,
-            original_file,
             prompt_file,
             _reservation,
             ..
@@ -259,35 +200,17 @@ impl Destination {
             .persist_noclobber(&path)
             .map_err(|error| error.error)
             .context("Cannot save image without overwriting")?;
-        let saved_original = match original_file
-            .persist_noclobber(&original_path)
-            .map_err(|error| error.error)
-        {
-            Ok(file) => file,
-            Err(error) => {
-                drop(saved_image);
-                fs::remove_file(&path).context("Original save failed and image rollback failed")?;
-                return Err(error).context("Original save failed; the partial image was removed");
-            }
-        };
         if let Err(error) = prompt_file
             .persist_noclobber(&sidecar)
             .map_err(|error| error.error)
         {
             drop(saved_image);
-            drop(saved_original);
-            let image_cleanup = fs::remove_file(&path);
-            let original_cleanup = fs::remove_file(&original_path);
-            image_cleanup.context("Prompt save failed and image rollback failed")?;
-            original_cleanup.context("Prompt save failed and original rollback failed")?;
-            return Err(error)
-                .context("Prompt save failed; the partial image and original were removed");
+            fs::remove_file(&path).context("Prompt save failed and image rollback failed")?;
+            return Err(error).context("Prompt save failed; the partial image was removed");
         }
         Ok(json!({
-            "path": path, "original_path": original_path, "prompt_file": sidecar, "width": width, "height": height,
+            "path": path, "prompt_file": sidecar, "width": width, "height": height,
             "mime_type": mime, "bytes": bytes, "model": metadata["request"]["model"],
-            "source_width": source_dimensions.0, "source_height": source_dimensions.1,
-            "resized": resized, "converted": converted,
         }))
     }
 }
@@ -329,272 +252,257 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn converts_resizes_and_saves_exact_prompt() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("image.png");
-        let destination = Destination::prepare(&path).unwrap();
-        assert!(Destination::prepare(&path).is_err());
-        let original = fixture(ImageFormat::Jpeg);
-        let result = destination.save(Decoded { bytes: original.clone(), revised_prompt: None }, 4, 4,
-            json!({"request": {"model": "gemini-image", "messages": [{"content": "exact prompt"}]}})).unwrap();
-        assert_eq!(image::open(&path).unwrap().dimensions(), (4, 4));
-        assert_eq!(result["converted"], true);
-        let original_path = dir.path().join("image.png.original.jpg");
-        assert_eq!(result["original_path"], original_path.to_str().unwrap());
-        assert_eq!(fs::read(&original_path).unwrap(), original);
-        assert_eq!(image::open(&original_path).unwrap().dimensions(), (8, 6));
-        let metadata: Value =
-            serde_json::from_slice(&fs::read(result["prompt_file"].as_str().unwrap()).unwrap())
-                .unwrap();
-        assert_eq!(
-            metadata["request"]["messages"][0]["content"],
-            "exact prompt"
-        );
-        assert_eq!(metadata["original"]["path"], result["original_path"]);
-        assert_eq!(metadata["original"]["mime_type"], "image/jpeg");
-        assert_eq!(metadata["original"]["width"], 8);
-        assert_eq!(metadata["original"]["height"], 6);
-        assert_eq!(metadata["original"]["bytes"], original.len());
-        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 3);
-        assert!(Destination::prepare(&path).is_err());
-        assert!(!dir.path().join("image.png.image-generation.lock").exists());
-    }
-
-    #[test]
-    fn preserves_native_bytes_and_converts_all_extensions() {
-        for (source_extension, source_format) in [
+    fn saves_exact_bytes_and_actual_dimensions() {
+        for (extension, format) in [
             ("png", ImageFormat::Png),
             ("jpg", ImageFormat::Jpeg),
             ("webp", ImageFormat::WebP),
         ] {
             let dir = tempfile::tempdir().unwrap();
-            let bytes = fixture(source_format);
-            for (extension, format) in [
-                ("png", ImageFormat::Png),
-                ("jpg", ImageFormat::Jpeg),
-                ("jpeg", ImageFormat::Jpeg),
-                ("webp", ImageFormat::WebP),
-            ] {
-                let path = dir.path().join(format!("image.{extension}"));
-                let result = Destination::prepare(&path)
-                    .unwrap()
-                    .save(
-                        Decoded {
-                            bytes: bytes.clone(),
-                            revised_prompt: None,
-                        },
-                        8,
-                        6,
-                        json!({}),
-                    )
-                    .unwrap();
-                let saved = fs::read(&path).unwrap();
-                let original_path = dir
-                    .path()
-                    .join(format!("image.{extension}.original.{source_extension}"));
-                assert_eq!(result["original_path"], original_path.to_str().unwrap());
-                assert_eq!(fs::read(&original_path).unwrap(), bytes);
-                let metadata: Value = serde_json::from_slice(
-                    &fs::read(result["prompt_file"].as_str().unwrap()).unwrap(),
+            let path = dir.path().join(format!("image.{extension}"));
+            let bytes = fixture(format);
+            let destination = Destination::prepare(&path).unwrap();
+            let result = destination
+                .save(
+                    Decoded {
+                        bytes: bytes.clone(),
+                        revised_prompt: Some("revised".to_string()),
+                    },
+                    json!({"request": {"model": "gemini-image"}}),
                 )
                 .unwrap();
-                assert_eq!(
-                    metadata["original"],
-                    json!({
-                        "path": original_path,
-                        "mime_type": source_format.to_mime_type(),
-                        "width": 8, "height": 6, "bytes": bytes.len(),
-                    })
-                );
-                assert_eq!(image::guess_format(&saved).unwrap(), format);
-                assert_eq!(image::open(&path).unwrap().dimensions(), (8, 6));
-                assert_eq!(result["resized"], false);
-                assert_eq!(result["converted"], source_format != format);
-                if format == source_format {
-                    assert_eq!(saved, bytes);
-                }
-            }
-            assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 12);
+            assert_eq!(result["path"], path.to_str().unwrap());
+            assert_eq!(fs::read(&path).unwrap(), bytes);
+            assert_eq!(result["width"], 8);
+            assert_eq!(result["height"], 6);
+            assert_eq!(result["mime_type"], format.to_mime_type());
+            assert_eq!(result["bytes"], bytes.len());
+            assert_eq!(result["model"], "gemini-image");
+            assert!(result.get("original_path").is_none());
+            assert!(result.get("resized").is_none());
+            assert!(result.get("converted").is_none());
+            let sidecar = dir.path().join(format!("image.{extension}.prompt.json"));
+            assert_eq!(result["prompt_file"], sidecar.to_str().unwrap());
+            let metadata: Value = serde_json::from_slice(&fs::read(&sidecar).unwrap()).unwrap();
+            assert_eq!(metadata["revised_prompt"], "revised");
+            assert_eq!(metadata["output"]["path"], path.to_str().unwrap());
+            assert_eq!(metadata["output"]["width"], 8);
+            assert_eq!(metadata["output"]["height"], 6);
+            assert_eq!(metadata["output"]["bytes"], bytes.len());
+            assert!(metadata.get("original").is_none());
+            assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
+            assert!(!dir.path().join("image.image-generation.lock").exists());
         }
     }
 
     #[test]
-    fn refuses_existing_originals_before_generation() {
-        for extension in ["png", "jpg", "webp"] {
-            for symlink in [false, true] {
-                let dir = tempfile::tempdir().unwrap();
-                let path = dir.path().join("image.png");
-                let original_path = dir.path().join(format!("image.png.original.{extension}"));
-                if symlink {
-                    std::os::unix::fs::symlink(dir.path().join("missing"), &original_path).unwrap();
-                } else {
-                    fs::write(&original_path, b"keep").unwrap();
-                }
-                let error = Destination::prepare(&path).err().unwrap();
-                assert!(error.to_string().contains("already exists"));
-                if symlink {
-                    assert_eq!(
-                        fs::read_link(&original_path).unwrap(),
-                        dir.path().join("missing")
-                    );
-                } else {
-                    assert_eq!(fs::read(&original_path).unwrap(), b"keep");
-                }
-                assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
-            }
-        }
-    }
-
-    #[test]
-    fn rolls_back_and_preserves_paths_taken_during_generation() {
-        for (suffix, expected_error) in [
-            ("", "Cannot save image without overwriting"),
-            (".original.jpg", "Original save failed"),
-            (".prompt.json", "Prompt save failed"),
+    fn corrects_extension_to_match_provider_format() {
+        for (requested, provider_format, expected_extension) in [
+            ("png", ImageFormat::Jpeg, "jpg"),
+            ("jpg", ImageFormat::Png, "png"),
+            ("jpeg", ImageFormat::WebP, "webp"),
+            ("webp", ImageFormat::Png, "png"),
+            ("PNG", ImageFormat::Png, "png"),
+            ("JPEG", ImageFormat::Jpeg, "jpeg"),
         ] {
-            for kind in ["file", "symlink", "directory"] {
-                let dir = tempfile::tempdir().unwrap();
-                let path = dir.path().join("image.jpg");
-                let conflict = dir.path().join(format!("image.jpg{suffix}"));
-                let destination = Destination::prepare(&path).unwrap();
-                match kind {
-                    "symlink" => {
-                        std::os::unix::fs::symlink(dir.path().join("missing"), &conflict).unwrap();
-                    }
-                    "directory" => fs::create_dir(&conflict).unwrap(),
-                    _ => fs::write(&conflict, b"keep").unwrap(),
-                }
-                let error = destination
-                    .save(
-                        Decoded {
-                            bytes: fixture(ImageFormat::Jpeg),
-                            revised_prompt: None,
-                        },
-                        8,
-                        6,
-                        json!({}),
-                    )
-                    .unwrap_err();
-                assert!(error.to_string().contains(expected_error), "{error:#}");
-                match kind {
-                    "symlink" => {
-                        assert_eq!(
-                            fs::read_link(&conflict).unwrap(),
-                            dir.path().join("missing")
-                        );
-                    }
-                    "directory" => assert!(conflict.is_dir()),
-                    _ => assert_eq!(fs::read(&conflict).unwrap(), b"keep"),
-                }
-                let remaining: Vec<_> = fs::read_dir(dir.path())
-                    .unwrap()
-                    .map(|entry| entry.unwrap().path())
-                    .collect();
-                assert_eq!(remaining, [conflict]);
-            }
+            let dir = tempfile::tempdir().unwrap();
+            let requested_path = dir.path().join(format!("image.{requested}"));
+            let bytes = fixture(provider_format);
+            let destination = Destination::prepare(&requested_path).unwrap();
+            let result = destination
+                .save(
+                    Decoded {
+                        bytes: bytes.clone(),
+                        revised_prompt: None,
+                    },
+                    json!({}),
+                )
+                .unwrap();
+            let expected_path = dir.path().join(format!("image.{expected_extension}"));
+            assert_eq!(result["path"], expected_path.to_str().unwrap());
+            assert!(!requested_path.exists());
+            assert_eq!(fs::read(&expected_path).unwrap(), bytes);
+            let sidecar = dir
+                .path()
+                .join(format!("image.{expected_extension}.prompt.json"));
+            assert_eq!(result["prompt_file"], sidecar.to_str().unwrap());
+            assert!(sidecar.exists());
+            assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
         }
     }
 
     #[test]
-    fn drops_reservations_and_preserves_competing_files() {
+    fn preserves_jpeg_extension_when_requested_and_provided() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("image.png");
-        drop(Destination::prepare(&path).unwrap());
-        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
-        assert!(
-            Destination::prepare(&path)
-                .unwrap()
-                .save(
-                    Decoded {
-                        bytes: b"invalid".to_vec(),
-                        revised_prompt: None
-                    },
-                    8,
-                    6,
-                    json!({})
-                )
-                .is_err()
-        );
-        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
-        let destination = Destination::prepare(&path).unwrap();
-        fs::write(&path, b"keep").unwrap();
-        assert!(
-            destination
-                .save(
-                    Decoded {
-                        bytes: fixture(ImageFormat::Png),
-                        revised_prompt: None
-                    },
-                    8,
-                    6,
-                    json!({})
-                )
-                .is_err()
-        );
-        assert_eq!(fs::read(&path).unwrap(), b"keep");
-        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
-    }
-
-    #[test]
-    fn crops_thin_source_before_resizing() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("image.png");
-        let mut source = image::RgbImage::from_pixel(16384, 1, image::Rgb([255, 0, 0]));
-        source.put_pixel(8191, 0, image::Rgb([0, 255, 0]));
-        let mut bytes = Cursor::new(Vec::new());
-        source.write_to(&mut bytes, ImageFormat::Png).unwrap();
-        let bytes = bytes.into_inner();
-        let saved = Destination::prepare(&path)
+        let path = dir.path().join("image.jpeg");
+        let bytes = fixture(ImageFormat::Jpeg);
+        let result = Destination::prepare(&path)
             .unwrap()
             .save(
                 Decoded {
                     bytes: bytes.clone(),
                     revised_prompt: None,
                 },
-                64,
-                64,
                 json!({}),
             )
             .unwrap();
-        let original_path = saved["original_path"].as_str().unwrap();
-        assert_eq!(fs::read(original_path).unwrap(), bytes);
-        assert_eq!(image::open(original_path).unwrap().to_rgb8(), source);
-        let result = image::open(&path).unwrap().to_rgb8();
-        assert_eq!(result.dimensions(), (64, 64));
-        assert!(
-            result
-                .pixels()
-                .all(|pixel| *pixel == image::Rgb([0, 255, 0]))
-        );
+        assert_eq!(result["path"], path.to_str().unwrap());
+        assert_eq!(fs::read(&path).unwrap(), bytes);
     }
 
     #[test]
-    fn refuses_symlinks_and_cleans_up_failed_writes() {
+    fn refuses_when_any_extension_variant_or_sidecar_exists() {
+        for conflict in [
+            "image.png",
+            "image.jpg",
+            "image.jpeg",
+            "image.webp",
+            "image.png.prompt.json",
+            "image.jpg.prompt.json",
+            "image.jpeg.prompt.json",
+            "image.webp.prompt.json",
+        ] {
+            for symlink in [false, true] {
+                let dir = tempfile::tempdir().unwrap();
+                let conflict_path = dir.path().join(conflict);
+                if symlink {
+                    std::os::unix::fs::symlink(dir.path().join("missing"), &conflict_path).unwrap();
+                } else {
+                    fs::write(&conflict_path, b"keep").unwrap();
+                }
+                let path = dir.path().join("image.png");
+                let error = Destination::prepare(&path).err().unwrap();
+                assert!(error.to_string().contains("already exists"));
+                assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+            }
+        }
+    }
+
+    #[test]
+    fn refuses_existing_requested_paths_with_uppercase_extensions() {
+        for suffix in ["", ".prompt.json"] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("image.PNG");
+            let conflict = dir.path().join(format!("image.PNG{suffix}"));
+            std::os::unix::fs::symlink(dir.path().join("missing"), &conflict).unwrap();
+            assert!(Destination::prepare(&path).is_err());
+            assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+            assert_eq!(fs::read_link(conflict).unwrap(), dir.path().join("missing"));
+        }
+    }
+
+    #[test]
+    fn reserves_a_shared_lock_across_extension_variants() {
+        let dir = tempfile::tempdir().unwrap();
+        let destination = Destination::prepare(&dir.path().join("image.png")).unwrap();
+        for extension in EXTENSIONS {
+            let error = Destination::prepare(&dir.path().join(format!("image.{extension}")))
+                .err()
+                .unwrap();
+            assert!(error.to_string().contains("reserve"));
+        }
+        assert!(Destination::prepare(&dir.path().join("other.png")).is_ok());
+        let lock = dir.path().join("image.image-generation.lock");
+        assert!(lock.exists());
+        drop(destination);
+        assert!(!lock.exists());
+        assert!(Destination::prepare(&dir.path().join("image.jpg")).is_ok());
+    }
+
+    #[test]
+    fn rolls_back_image_when_sidecar_persist_fails() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("image.png");
-        std::os::unix::fs::symlink(dir.path().join("missing"), &path).unwrap();
-        assert!(Destination::prepare(&path).is_err());
-        fs::remove_file(&path).unwrap();
         let destination = Destination::prepare(&path).unwrap();
-        fs::write(dir.path().join("image.png.prompt.json"), b"keep").unwrap();
+        let sidecar = dir.path().join("image.png.prompt.json");
+        fs::write(&sidecar, b"keep").unwrap();
+        let error = destination
+            .save(
+                Decoded {
+                    bytes: fixture(ImageFormat::Png),
+                    revised_prompt: None,
+                },
+                json!({}),
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("Prompt save failed"));
+        assert!(!path.exists());
+        assert_eq!(fs::read(&sidecar).unwrap(), b"keep");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+        assert!(!dir.path().join("image.image-generation.lock").exists());
+    }
+
+    #[test]
+    fn fails_to_save_when_final_path_appears_after_preflight() {
+        let dir = tempfile::tempdir().unwrap();
+        let requested = dir.path().join("image.png");
+        let destination = Destination::prepare(&requested).unwrap();
+        let final_path = dir.path().join("image.jpg");
+        fs::write(&final_path, b"keep").unwrap();
+        let error = destination
+            .save(
+                Decoded {
+                    bytes: fixture(ImageFormat::Jpeg),
+                    revised_prompt: None,
+                },
+                json!({}),
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("Cannot save image"));
+        assert_eq!(fs::read(&final_path).unwrap(), b"keep");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+        assert!(!dir.path().join("image.image-generation.lock").exists());
+    }
+
+    #[test]
+    fn rejects_provider_images_exceeding_safety_limits() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("image.png");
+        let oversized = image::RgbImage::from_pixel(16385, 1, image::Rgb([1, 2, 3]));
+        let mut bytes = Cursor::new(Vec::new());
+        oversized.write_to(&mut bytes, ImageFormat::Png).unwrap();
+        let bytes = bytes.into_inner();
+        let error = Destination::prepare(&path)
+            .unwrap()
+            .save(
+                Decoded {
+                    bytes,
+                    revised_prompt: None,
+                },
+                json!({}),
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("invalid image"));
+        assert!(!path.exists());
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn rejects_non_absolute_and_unsupported_extensions() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(Destination::prepare(Path::new("relative.png")).is_err());
+        assert!(Destination::prepare(&dir.path().join("image.gif")).is_err());
+    }
+
+    #[test]
+    fn rejects_unsupported_provider_formats() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("image.png");
+        let error = Destination::prepare(&path)
+            .unwrap()
+            .save(
+                Decoded {
+                    bytes: b"GIF89a".to_vec(),
+                    revised_prompt: None,
+                },
+                json!({}),
+            )
+            .unwrap_err();
         assert!(
-            destination
-                .save(
-                    Decoded {
-                        bytes: fixture(ImageFormat::Png),
-                        revised_prompt: None
-                    },
-                    8,
-                    6,
-                    json!({})
-                )
-                .is_err()
+            error
+                .to_string()
+                .contains("Unsupported provider image format")
         );
         assert!(!path.exists());
-        assert_eq!(
-            fs::read(dir.path().join("image.png.prompt.json")).unwrap(),
-            b"keep"
-        );
-        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 }

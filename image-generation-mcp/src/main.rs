@@ -69,7 +69,7 @@ impl ImageServer {
     }
 
     #[tool(
-        description = "Generate and save an image and its unmodified original. First get a successful response from the guidance tool. Never overwrites. One paid request, no automatic retry.",
+        description = "Generate and save an image with the exact provider bytes. Use provider-native size values; aspect_ratio is Gemini-only. First get a successful response from the guidance tool. Generation is complete only when this tool returns a saved path. Never overwrites. One paid request, no automatic retry.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -81,7 +81,7 @@ impl ImageServer {
     }
 
     #[tool(
-        description = "Modify a local image with an OpenAI GPT image model using the actual source bytes and optional mask. First get guidance. Never overwrites the input or output. One paid request, no automatic retry. Unrelated pixels may change.",
+        description = "Modify a local image with an OpenAI GPT image model using the actual source bytes and optional mask. First get guidance. Modification is complete only when this tool returns a saved path. Never overwrites the input or output. One paid request, no automatic retry. Unrelated pixels may change.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -97,7 +97,7 @@ impl ImageServer {
 impl ServerHandler for ImageServer {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
-            .with_instructions("Before image generation or modification, call the guidance tool. If it fails, stop and report the error. Do not guess a model or call generate or modify without successful guidance. Use generate for new images and modify for edits to a local image. The modify tool supports only models with route openai. Do not orchestrate shell scripts. Report success only after the tool returns a saved path.")
+            .with_instructions("Before image generation or modification, call the guidance tool. If it fails, stop and report the error. Do not guess a model or call generate or modify without successful guidance. Use generate for new images and modify for edits to a local image. The modify tool supports only models with route openai. Do not orchestrate shell scripts, use curl, or research API syntax to perform a generate or modify request; call the tool directly. Generation or modification is complete only after generate or modify returns a saved image path. Do not report success before that. After the tool returns a saved path, you can postprocess that local file, for example with ImageMagick.")
     }
 }
 
@@ -139,20 +139,22 @@ mod tests {
                 .is_none_or(|required| required.as_array().unwrap().is_empty())
         );
         let generation = tools.iter().find(|tool| tool.name == "generate").unwrap();
-        assert_eq!(
-            generation.input_schema["properties"]
-                .as_object()
-                .unwrap()
-                .len(),
-            5
-        );
-        assert_eq!(
-            generation.input_schema["required"]
-                .as_array()
-                .unwrap()
-                .len(),
-            5
-        );
+        let properties = generation.input_schema["properties"].as_object().unwrap();
+        assert_eq!(properties.len(), 5);
+        assert!(properties.contains_key("size"));
+        assert!(properties.contains_key("aspect_ratio"));
+        assert!(!properties.contains_key("width"));
+        assert!(!properties.contains_key("height"));
+        assert_eq!(properties["size"]["type"], json!(["string", "null"]));
+        assert!(properties["size"].get("enum").is_none());
+        let mut required: Vec<_> = generation.input_schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect();
+        required.sort_unstable();
+        assert_eq!(required, ["local_path", "model", "prompt"]);
         assert!(
             generation
                 .description
@@ -161,13 +163,13 @@ mod tests {
                 .contains("guidance tool")
         );
         let modification = tools.iter().find(|tool| tool.name == "modify").unwrap();
-        assert_eq!(
-            modification.input_schema["properties"]
-                .as_object()
-                .unwrap()
-                .len(),
-            7
-        );
+        let properties = modification.input_schema["properties"].as_object().unwrap();
+        assert_eq!(properties.len(), 6);
+        assert_eq!(properties["size"]["type"], json!(["string", "null"]));
+        assert!(properties["size"].get("enum").is_none());
+        assert!(!properties.contains_key("aspect_ratio"));
+        assert!(!properties.contains_key("width"));
+        assert!(!properties.contains_key("height"));
         let mut required: Vec<_> = modification.input_schema["required"]
             .as_array()
             .unwrap()

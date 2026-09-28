@@ -10,10 +10,10 @@ use std::{
 };
 
 use base64::{Engine, engine::general_purpose::STANDARD};
-use image::{GenericImageView, ImageFormat};
+use image::ImageFormat;
 use serde_json::{Value, json};
 use wiremock::{
-    Mock, MockServer, Request, ResponseTemplate,
+    Mock, MockGuard, MockServer, Request, ResponseTemplate,
     matchers::{body_json, body_partial_json, header, method, path},
 };
 
@@ -25,6 +25,15 @@ const MODELS: [(&str, ImageFormat, &str); 3] = [
     ("gemini-image-smoke", ImageFormat::Jpeg, "jpg"),
     ("gemini-image-webp", ImageFormat::WebP, "webp"),
 ];
+const BASE_RATIOS: [&str; 10] = [
+    "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9",
+];
+const EXTRA_RATIOS: [&str; 4] = ["1:4", "4:1", "1:8", "8:1"];
+const ALL_RATIOS: [&str; 14] = [
+    "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9", "1:4", "4:1", "1:8",
+    "8:1",
+];
+const GEMINI_SIZES: [&str; 4] = ["512", "1K", "2K", "4K"];
 
 struct StdioClient {
     child: Child,
@@ -113,14 +122,22 @@ impl StdioClient {
         response["result"].clone()
     }
 
-    fn generate(&mut self, path: &Path, model: &str, dimensions: (u32, u32)) -> Value {
-        self.tool(
-            "generate",
-            json!({
-                "model": model, "local_path": path, "prompt": PROMPT,
-                "width": dimensions.0, "height": dimensions.1,
-            }),
-        )
+    fn generate(
+        &mut self,
+        path: &Path,
+        model: &str,
+        size: Option<&str>,
+        aspect_ratio: Option<&str>,
+    ) -> Value {
+        let mut arguments = json!({"model": model, "local_path": path, "prompt": PROMPT});
+        let object = arguments.as_object_mut().unwrap();
+        if let Some(size) = size {
+            object.insert("size".into(), json!(size));
+        }
+        if let Some(ratio) = aspect_ratio {
+            object.insert("aspect_ratio".into(), json!(ratio));
+        }
+        self.tool("generate", arguments)
     }
 
     fn modify(&mut self, input: &Path, output: &Path, options: Value) -> Value {
@@ -173,16 +190,21 @@ async fn metadata_proxy(expected_requests: u64) -> MockServer {
     server
 }
 
-async fn mount_catalog(server: &MockServer) {
+async fn mount_models(server: &MockServer, models: &[&str]) {
     Mock::given(method("GET"))
         .and(path("/v1/models"))
         .and(header("authorization", "Bearer local-test-key"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "data": MODELS.iter().map(|(model, _, _)| json!({"id": model})).collect::<Vec<_>>(),
+            "data": models.iter().map(|model| json!({"id": model})).collect::<Vec<_>>(),
         })))
         .expect(1)
         .mount(server)
         .await;
+}
+
+async fn mount_catalog(server: &MockServer) {
+    let ids: Vec<&str> = MODELS.iter().map(|(model, _, _)| *model).collect();
+    mount_models(server, &ids).await;
 }
 
 fn structured(result: &Value) -> &Value {
@@ -203,15 +225,6 @@ fn assert_guidance(result: &Value) {
             .iter()
             .any(|warning| { warning.as_str().unwrap().contains("Metadata unavailable") })
     );
-    assert_eq!(
-        data["models"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|model| model["model"].as_str().unwrap())
-            .collect::<BTreeSet<_>>(),
-        MODELS.iter().map(|(model, _, _)| *model).collect(),
-    );
     assert!(
         data["models"]
             .as_array()
@@ -231,6 +244,13 @@ fn assert_error(result: &Value, expected: &str) {
     assert!(!text.contains("local-test-key"));
 }
 
+fn assert_schema_rejected(response: &Value) {
+    assert!(
+        response["error"].is_object() || response["result"]["isError"] == true,
+        "{response}"
+    );
+}
+
 fn entries(directory: &Path) -> BTreeSet<PathBuf> {
     fs::read_dir(directory)
         .unwrap()
@@ -247,9 +267,56 @@ fn fixture(format: ImageFormat) -> Vec<u8> {
     bytes.into_inner()
 }
 
+fn expected_extension(format: ImageFormat, requested: &str) -> &'static str {
+    match format {
+        ImageFormat::Png => "png",
+        ImageFormat::WebP => "webp",
+        ImageFormat::Jpeg if requested == "jpeg" => "jpeg",
+        ImageFormat::Jpeg => "jpg",
+        _ => unreachable!(),
+    }
+}
+
+fn is_gpt_model(model: &str) -> bool {
+    model
+        .rsplit('/')
+        .next()
+        .unwrap_or(model)
+        .starts_with("gpt-")
+}
+
+fn openai_generate_request(model: &str, size: &str) -> Value {
+    json!({"model": model, "prompt": PROMPT, "n": 1, "size": size,
+        "quality": "auto", "output_format": "png", "response_format": "b64_json"})
+}
+
+fn gemini_config(size: Option<&str>, ratio: Option<&str>) -> Option<Value> {
+    if size.is_none() && ratio.is_none() {
+        return None;
+    }
+    let mut config = json!({});
+    let object = config.as_object_mut().unwrap();
+    if let Some(ratio) = ratio {
+        object.insert("aspect_ratio".into(), json!(ratio));
+    }
+    if let Some(size) = size {
+        object.insert("image_size".into(), json!(size));
+    }
+    Some(config)
+}
+
+fn gemini_generate_request(model: &str, config: Option<Value>) -> Value {
+    let mut request = json!({"model": model, "messages": [{"role": "user", "content": PROMPT}],
+        "modalities": ["text", "image"], "stream": false});
+    if let Some(config) = config {
+        request["image_config"] = config;
+    }
+    request
+}
+
 fn generation_response(model: &str, bytes: &[u8]) -> ResponseTemplate {
     let encoded = STANDARD.encode(bytes);
-    let response = if model.starts_with("gpt-") {
+    let response = if is_gpt_model(model) {
         json!({"data": [{"b64_json": encoded}]})
     } else {
         json!({"choices": [{"message": {"images": [{"image_url": {
@@ -260,7 +327,7 @@ fn generation_response(model: &str, bytes: &[u8]) -> ResponseTemplate {
 }
 
 fn generation_mock(model: &str) -> wiremock::MockBuilder {
-    let (endpoint, body) = if model.starts_with("gpt-") {
+    let (endpoint, body) = if is_gpt_model(model) {
         (
             "/v1/images/generations",
             json!({"model": model, "prompt": PROMPT, "n": 1}),
@@ -277,6 +344,54 @@ fn generation_mock(model: &str) -> wiremock::MockBuilder {
         .and(path(endpoint))
         .and(header("authorization", "Bearer local-test-key"))
         .and(body_partial_json(body))
+}
+
+async fn expect_generation(
+    server: &MockServer,
+    model: &str,
+    body: Value,
+    bytes: &[u8],
+) -> MockGuard {
+    generation_mock(model)
+        .and(body_json(body))
+        .respond_with(generation_response(model, bytes))
+        .expect(1)
+        .mount_as_scoped(server)
+        .await
+}
+
+async fn expect_generate_success(
+    server: &MockServer,
+    client: &mut StdioClient,
+    dir: &Path,
+    model: &str,
+    size: Option<&str>,
+    ratio: Option<&str>,
+    expected_body: Value,
+) {
+    let bytes = fixture(ImageFormat::Png);
+    let mock = expect_generation(server, model, expected_body, &bytes).await;
+    let output_dir = tempfile::tempdir_in(dir).unwrap();
+    let result = client.generate(&output_dir.path().join("asset.png"), model, size, ratio);
+    tokio::task::spawn_blocking(move || drop(mock))
+        .await
+        .unwrap();
+    structured(&result);
+}
+
+fn expect_generate_error(
+    client: &mut StdioClient,
+    dir: &Path,
+    model: &str,
+    size: Option<&str>,
+    ratio: Option<&str>,
+    expected: &str,
+) {
+    let output_dir = tempfile::tempdir_in(dir).unwrap();
+    let output = output_dir.path().join("asset.png");
+    let result = client.generate(&output, model, size, ratio);
+    assert_error(&result, expected);
+    assert!(entries(output_dir.path()).is_empty());
 }
 
 fn modification_mock() -> wiremock::MockBuilder {
@@ -341,13 +456,30 @@ async fn negotiates_protocols_and_loads_embedded_guidance_outside_the_source_tre
             .iter()
             .find(|tool| tool["name"] == "generate")
             .unwrap();
+        let properties = generation["inputSchema"]["properties"].as_object().unwrap();
+        assert_eq!(properties.len(), 5);
+        assert_eq!(properties["size"]["type"], json!(["string", "null"]));
+        assert!(properties["size"].get("enum").is_none());
+        let ratio_ref = properties["aspect_ratio"]["anyOf"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find_map(|schema| schema.get("$ref").and_then(Value::as_str))
+            .unwrap();
+        let ratios = generation["inputSchema"]
+            .pointer(ratio_ref.strip_prefix('#').unwrap())
+            .unwrap()["enum"]
+            .as_array()
+            .unwrap();
         assert_eq!(
-            generation["inputSchema"]["properties"]
-                .as_object()
-                .unwrap()
-                .len(),
-            5
+            ratios
+                .iter()
+                .map(|ratio| ratio.as_str().unwrap())
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from(ALL_RATIOS)
         );
+        assert!(!properties.contains_key("width"));
+        assert!(!properties.contains_key("height"));
         assert_eq!(
             generation["inputSchema"]["required"]
                 .as_array()
@@ -355,14 +487,13 @@ async fn negotiates_protocols_and_loads_embedded_guidance_outside_the_source_tre
                 .iter()
                 .map(|field| field.as_str().unwrap())
                 .collect::<BTreeSet<_>>(),
-            BTreeSet::from(["model", "local_path", "width", "height", "prompt"])
+            BTreeSet::from(["model", "local_path", "prompt"])
         );
         let modification = tools.iter().find(|tool| tool["name"] == "modify").unwrap();
         let schema = &modification["inputSchema"];
+        let properties = schema["properties"].as_object().unwrap();
         assert_eq!(
-            schema["properties"]
-                .as_object()
-                .unwrap()
+            properties
                 .keys()
                 .map(String::as_str)
                 .collect::<BTreeSet<_>>(),
@@ -371,11 +502,15 @@ async fn negotiates_protocols_and_loads_embedded_guidance_outside_the_source_tre
                 "input_path",
                 "local_path",
                 "prompt",
-                "width",
-                "height",
+                "size",
                 "mask_path"
             ]),
         );
+        assert_eq!(properties["size"]["type"], json!(["string", "null"]));
+        assert!(properties["size"].get("enum").is_none());
+        assert!(!properties.contains_key("aspect_ratio"));
+        assert!(!properties.contains_key("width"));
+        assert!(!properties.contains_key("height"));
         assert_eq!(
             schema["required"]
                 .as_array()
@@ -394,7 +529,7 @@ async fn negotiates_protocols_and_loads_embedded_guidance_outside_the_source_tre
         }
         for name in ["generate_image_instructions", "generate_image"] {
             let response = client.rpc("tools/call", json!({"name": name, "arguments": {}}));
-            assert!(response["error"].is_object() || response["result"]["isError"] == true);
+            assert_schema_rejected(&response);
         }
         client.finish();
         assert!(entries(directory.path()).is_empty());
@@ -411,85 +546,75 @@ async fn negotiates_protocols_and_loads_embedded_guidance_outside_the_source_tre
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn saves_all_formats_with_exact_originals_and_metadata() {
+async fn saves_all_formats_with_exact_bytes_and_metadata() {
     let server = MockServer::start().await;
     mount_catalog(&server).await;
     let metadata = metadata_proxy(1).await;
     let directory = tempfile::tempdir().unwrap();
     let mut client = StdioClient::start(&server, &metadata, directory.path(), "2025-11-25");
     assert_guidance(&client.tool("guidance", json!({})));
-    for (model, source_format, source_extension) in MODELS {
+    for (model, source_format, _) in MODELS {
         let bytes = fixture(source_format);
+        let (size, ratio): (Option<&str>, Option<&str>) = if is_gpt_model(model) {
+            (Some("1536x1024"), None)
+        } else {
+            (Some("1K"), Some("16:9"))
+        };
         generation_mock(model)
             .respond_with(generation_response(model, &bytes))
-            .expect(8)
+            .expect(4)
             .mount(&server)
             .await;
-        for (extension, format) in [
-            ("png", ImageFormat::Png),
-            ("jpg", ImageFormat::Jpeg),
-            ("jpeg", ImageFormat::Jpeg),
-            ("webp", ImageFormat::WebP),
-        ] {
-            for (width, height) in [(128, 96), (64, 128)] {
-                let output_dir = tempfile::tempdir_in(directory.path()).unwrap();
-                let output = output_dir.path().join(format!("asset.{extension}"));
-                let result = client.generate(&output, model, (width, height));
-                let result = structured(&result);
-                let original = output_dir
-                    .path()
-                    .join(format!("asset.{extension}.original.{source_extension}"));
-                let prompt_file = output_dir
-                    .path()
-                    .join(format!("asset.{extension}.prompt.json"));
-                assert_eq!(result["path"], output.to_str().unwrap());
-                assert_eq!(result["original_path"], original.to_str().unwrap());
-                assert_eq!(result["prompt_file"], prompt_file.to_str().unwrap());
-                assert_eq!(fs::read(&original).unwrap(), bytes);
-                assert_eq!(image::open(&original).unwrap().dimensions(), (128, 96));
-                let saved = fs::read(&output).unwrap();
-                assert_eq!(image::guess_format(&saved).unwrap(), format);
-                assert_eq!(image::open(&output).unwrap().dimensions(), (width, height));
-                assert_eq!(result["mime_type"], format.to_mime_type());
-                assert_eq!(result["bytes"], saved.len());
-                assert_eq!(result["width"], width);
-                assert_eq!(result["height"], height);
-                assert_eq!(result["source_width"], 128);
-                assert_eq!(result["source_height"], 96);
-                assert_eq!(result["converted"], format != source_format);
-                assert_eq!(result["resized"], (width, height) != (128, 96));
-                if format == source_format && (width, height) == (128, 96) {
-                    assert_eq!(saved, bytes);
-                }
-                let sidecar: Value =
-                    serde_json::from_slice(&fs::read(&prompt_file).unwrap()).unwrap();
-                assert_eq!(
-                    sidecar["original"],
-                    json!({
-                        "path": original, "mime_type": source_format.to_mime_type(),
-                        "width": 128, "height": 96, "bytes": bytes.len(),
-                    })
-                );
-                assert_eq!(
-                    sidecar["requested_dimensions"],
-                    json!({"width": width, "height": height})
-                );
-                let prompt = if model.starts_with("gpt-") {
-                    &sidecar["request"]["prompt"]
-                } else {
-                    &sidecar["request"]["messages"][0]["content"]
-                };
-                assert_eq!(prompt, PROMPT);
-                assert_eq!(
-                    entries(output_dir.path()),
-                    BTreeSet::from([output, original, prompt_file])
-                );
+        for extension in ["png", "jpg", "jpeg", "webp"] {
+            let output_dir = tempfile::tempdir_in(directory.path()).unwrap();
+            let requested = output_dir.path().join(format!("asset.{extension}"));
+            let result = client.generate(&requested, model, size, ratio);
+            let result = structured(&result);
+            let actual_extension = expected_extension(source_format, extension);
+            let output = output_dir.path().join(format!("asset.{actual_extension}"));
+            let prompt_file = output_dir
+                .path()
+                .join(format!("asset.{actual_extension}.prompt.json"));
+            assert_eq!(result["path"], output.to_str().unwrap());
+            assert_eq!(result["prompt_file"], prompt_file.to_str().unwrap());
+            assert_eq!(result["model"], model);
+            assert_eq!(result["width"], 128);
+            assert_eq!(result["height"], 96);
+            assert_eq!(result["mime_type"], source_format.to_mime_type());
+            let saved = fs::read(&output).unwrap();
+            assert_eq!(saved, bytes);
+            assert_eq!(result["bytes"], saved.len());
+            assert_eq!(image::guess_format(&saved).unwrap(), source_format);
+            let sidecar: Value = serde_json::from_slice(&fs::read(&prompt_file).unwrap()).unwrap();
+            assert_eq!(sidecar["requested_size"], size.unwrap());
+            match ratio {
+                Some(ratio) => assert_eq!(sidecar["requested_aspect_ratio"], ratio),
+                None => assert!(sidecar["requested_aspect_ratio"].is_null()),
             }
+            assert!(sidecar["response_model"].is_null());
+            assert!(sidecar["revised_prompt"].is_null());
+            assert_eq!(
+                sidecar["output"],
+                json!({
+                    "path": output, "mime_type": source_format.to_mime_type(),
+                    "width": 128, "height": 96, "bytes": bytes.len(),
+                })
+            );
+            let prompt = if is_gpt_model(model) {
+                &sidecar["request"]["prompt"]
+            } else {
+                &sidecar["request"]["messages"][0]["content"]
+            };
+            assert_eq!(prompt, PROMPT);
+            assert_eq!(
+                entries(output_dir.path()),
+                BTreeSet::from([output, prompt_file])
+            );
         }
     }
     client.finish();
     assert!(entries(directory.path()).is_empty());
-    assert_eq!(server.received_requests().await.unwrap().len(), 25);
+    assert_eq!(server.received_requests().await.unwrap().len(), 13);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -499,40 +624,30 @@ async fn modifies_actual_images_and_masks_with_exact_outputs_and_metadata() {
             "gpt-image-1",
             ImageFormat::Png,
             ImageFormat::Jpeg,
-            "jpg",
             "webp",
-            ImageFormat::WebP,
             Some("high"),
+            "1024x1536",
         ),
         (
             "gpt-image-1.5",
             ImageFormat::Jpeg,
             ImageFormat::WebP,
-            "webp",
             "png",
-            ImageFormat::Png,
             Some("high"),
+            "1536x1024",
         ),
         (
             "gpt-image-2",
             ImageFormat::WebP,
             ImageFormat::Png,
-            "png",
             "jpeg",
-            ImageFormat::Jpeg,
             None,
+            "1600x1024",
         ),
     ];
     let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/v1/models"))
-        .and(header("authorization", "Bearer local-test-key"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "data": cases.iter().map(|case| json!({"id": case.0})).collect::<Vec<_>>(),
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
+    let ids: Vec<&str> = cases.iter().map(|case| case.0).collect();
+    mount_models(&server, &ids).await;
     let metadata = metadata_proxy(1).await;
     let directory = tempfile::tempdir().unwrap();
     let mut client = StdioClient::start(&server, &metadata, directory.path(), "2025-11-25");
@@ -543,32 +658,21 @@ async fn modifies_actual_images_and_masks_with_exact_outputs_and_metadata() {
             .len(),
         3
     );
-    for (
-        model,
-        input_format,
-        response_format,
-        response_extension,
-        extension,
-        output_format,
-        fidelity,
-    ) in cases
-    {
+    for (model, input_format, response_format, extension, fidelity, native) in cases {
         for masked in [false, true] {
-            for dimensions in [None, Some((64, 128))] {
+            for sized in [None, Some(native)] {
                 let output_dir = tempfile::tempdir_in(directory.path()).unwrap();
                 let input = output_dir.path().join("source.dat");
                 let input_bytes = fixture(input_format);
                 fs::write(&input, &input_bytes).unwrap();
                 let mask = output_dir.path().join("mask.png");
                 let mut options = json!({"model": model});
-                let (width, height) = dimensions.unwrap_or((128, 96));
-                if dimensions.is_some() {
-                    options["width"] = json!(width);
-                    options["height"] = json!(height);
+                let size_field = sized.unwrap_or("auto");
+                if let Some(size) = sized {
+                    options["size"] = json!(size);
                 }
                 let mut expected_request = json!({
-                    "model": model, "prompt": EDIT_PROMPT, "n": 1,
-                    "size": if dimensions.is_some() { "1024x1536" } else { "auto" },
+                    "model": model, "prompt": EDIT_PROMPT, "n": 1, "size": size_field,
                     "quality": "auto", "output_format": "png",
                     "images": [{"image_url": format!("data:{};base64,{}", input_format.to_mime_type(), STANDARD.encode(&input_bytes))}],
                 });
@@ -603,26 +707,21 @@ async fn modifies_actual_images_and_masks_with_exact_outputs_and_metadata() {
                 let output = output_dir.path().join(format!("edited.{extension}"));
                 let result = client.modify(&input, &output, options);
                 let result = structured(&result);
-                let original = output_dir
-                    .path()
-                    .join(format!("edited.{extension}.original.{response_extension}"));
+                let actual_extension = expected_extension(response_format, extension);
+                let final_output = output_dir.path().join(format!("edited.{actual_extension}"));
                 let prompt_file = output_dir
                     .path()
-                    .join(format!("edited.{extension}.prompt.json"));
-                assert_eq!(result["path"], output.to_str().unwrap());
-                assert_eq!(result["original_path"], original.to_str().unwrap());
+                    .join(format!("edited.{actual_extension}.prompt.json"));
+                assert_eq!(result["path"], final_output.to_str().unwrap());
                 assert_eq!(result["prompt_file"], prompt_file.to_str().unwrap());
                 assert_eq!(result["model"], model);
-                assert_eq!(result["width"], width);
-                assert_eq!(result["height"], height);
-                assert_eq!(result["mime_type"], output_format.to_mime_type());
-                assert_eq!(result["bytes"], fs::metadata(&output).unwrap().len());
-                assert_eq!(image::open(&output).unwrap().dimensions(), (width, height));
-                assert_eq!(
-                    image::guess_format(&fs::read(&output).unwrap()).unwrap(),
-                    output_format
-                );
-                assert_eq!(fs::read(&original).unwrap(), response_bytes);
+                assert_eq!(result["width"], 128);
+                assert_eq!(result["height"], 96);
+                assert_eq!(result["mime_type"], response_format.to_mime_type());
+                let saved = fs::read(&final_output).unwrap();
+                assert_eq!(saved, response_bytes);
+                assert_eq!(result["bytes"], saved.len());
+                assert_eq!(image::guess_format(&saved).unwrap(), response_format);
                 assert_ne!(response_bytes, input_bytes);
                 assert_eq!(fs::read(&input).unwrap(), input_bytes);
                 let sidecar_text = fs::read_to_string(&prompt_file).unwrap();
@@ -634,10 +733,16 @@ async fn modifies_actual_images_and_masks_with_exact_outputs_and_metadata() {
                 assert_eq!(sidecar["operation"], "modify");
                 assert_eq!(sidecar["response_model"], model);
                 assert_eq!(sidecar["revised_prompt"], "provider revision");
-                assert_eq!(
-                    sidecar["requested_dimensions"],
-                    json!({"width": width, "height": height})
+                assert!(
+                    !sidecar
+                        .as_object()
+                        .unwrap()
+                        .contains_key("requested_aspect_ratio")
                 );
+                match sized {
+                    Some(size) => assert_eq!(sidecar["requested_size"], size),
+                    None => assert!(sidecar["requested_size"].is_null()),
+                }
                 assert_eq!(
                     sidecar["input"],
                     json!({
@@ -645,14 +750,8 @@ async fn modifies_actual_images_and_masks_with_exact_outputs_and_metadata() {
                         "width": 128, "height": 96, "bytes": input_bytes.len(),
                     })
                 );
-                assert_eq!(
-                    sidecar["original"],
-                    json!({
-                        "path": original, "mime_type": response_format.to_mime_type(),
-                        "width": 128, "height": 96, "bytes": response_bytes.len(),
-                    })
-                );
-                let mut expected_files = BTreeSet::from([input, output, original, prompt_file]);
+                let mut expected_files =
+                    BTreeSet::from([input.clone(), final_output.clone(), prompt_file.clone()]);
                 if let Some(mask_bytes) = mask_bytes {
                     assert_eq!(fs::read(&mask).unwrap(), mask_bytes);
                     assert_eq!(
@@ -661,7 +760,7 @@ async fn modifies_actual_images_and_masks_with_exact_outputs_and_metadata() {
                             "path": mask, "mime_type": "image/png", "width": 128, "height": 96, "bytes": mask_bytes.len(),
                         })
                     );
-                    expected_files.insert(mask);
+                    expected_files.insert(mask.clone());
                 } else {
                     assert!(sidecar["mask"].is_null());
                 }
@@ -676,6 +775,574 @@ async fn modifies_actual_images_and_masks_with_exact_outputs_and_metadata() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn gpt_size_generation_matches_family_capabilities() {
+    let legacy_models = [
+        "gpt-image-1",
+        "gpt-image-1.5",
+        "gpt-image-1-mini",
+        "account/gpt-image-1.5-2025-12-16",
+    ];
+    let flexible_models = [
+        "gpt-image-2",
+        "gpt-image-2.5",
+        "account/gpt-image-2-2026-04-21",
+        "gpt-image-2.5-flare",
+    ];
+    let unknown_models = ["gpt-image-smoke", "gpt-image-20", "gpt-image-unknown"];
+    let ids: Vec<&str> = legacy_models
+        .iter()
+        .chain(flexible_models.iter())
+        .chain(unknown_models.iter())
+        .copied()
+        .collect();
+    let server = MockServer::start().await;
+    mount_models(&server, &ids).await;
+    let metadata = metadata_proxy(1).await;
+    let directory = tempfile::tempdir().unwrap();
+    let mut client = StdioClient::start(&server, &metadata, directory.path(), "2025-11-25");
+    assert_guidance(&client.tool("guidance", json!({})));
+
+    for model in legacy_models {
+        for (input, native) in [
+            (None, "auto"),
+            (Some("auto"), "auto"),
+            (Some("1024x1024"), "1024x1024"),
+            (Some("1536x1024"), "1536x1024"),
+            (Some("1024x1536"), "1024x1536"),
+        ] {
+            let expected = openai_generate_request(model, native);
+            expect_generate_success(
+                &server,
+                &mut client,
+                directory.path(),
+                model,
+                input,
+                None,
+                expected,
+            )
+            .await;
+        }
+        for invalid in ["1600x1024", "2048x2048", "512x512", "1K"] {
+            expect_generate_error(
+                &mut client,
+                directory.path(),
+                model,
+                Some(invalid),
+                None,
+                "size",
+            );
+        }
+        expect_generate_error(
+            &mut client,
+            directory.path(),
+            model,
+            Some("1024x1024"),
+            Some("1:1"),
+            "aspect",
+        );
+    }
+
+    for model in flexible_models {
+        for (input, native) in [
+            (None, "auto"),
+            (Some("auto"), "auto"),
+            (Some("1600x1024"), "1600x1024"),
+            (Some("1008x1008"), "1008x1008"),
+            (Some("640x1024"), "640x1024"),
+            (Some("3840x2160"), "3840x2160"),
+            (Some("3840x1280"), "3840x1280"),
+        ] {
+            let expected = openai_generate_request(model, native);
+            expect_generate_success(
+                &server,
+                &mut client,
+                directory.path(),
+                model,
+                input,
+                None,
+                expected,
+            )
+            .await;
+        }
+        for invalid in [
+            "320x2048",
+            "1601x1024",
+            "4096x1024",
+            "512x512",
+            "3840x3840",
+            "0x1024",
+            "100x0",
+            "-100x100",
+            "abcxdef",
+            "1024",
+            "",
+            "99999999999x1024",
+            "1K",
+            "512",
+        ] {
+            expect_generate_error(
+                &mut client,
+                directory.path(),
+                model,
+                Some(invalid),
+                None,
+                "size",
+            );
+        }
+        expect_generate_error(
+            &mut client,
+            directory.path(),
+            model,
+            Some("1024x1024"),
+            Some("1:1"),
+            "aspect",
+        );
+    }
+
+    for model in unknown_models {
+        for (input, native) in [
+            (None, "auto"),
+            (Some("auto"), "auto"),
+            (Some("10000x10000"), "10000x10000"),
+            (Some("50x50"), "50x50"),
+            (Some("1600x1024"), "1600x1024"),
+        ] {
+            let expected = openai_generate_request(model, native);
+            expect_generate_success(
+                &server,
+                &mut client,
+                directory.path(),
+                model,
+                input,
+                None,
+                expected,
+            )
+            .await;
+        }
+        for invalid in [
+            "1K",
+            "512",
+            "",
+            "0x100",
+            "100x0",
+            "-100x100",
+            "abcxdef",
+            "1024",
+            "99999999999x100",
+        ] {
+            expect_generate_error(
+                &mut client,
+                directory.path(),
+                model,
+                Some(invalid),
+                None,
+                "size",
+            );
+        }
+        expect_generate_error(
+            &mut client,
+            directory.path(),
+            model,
+            Some("1024x1024"),
+            Some("1:1"),
+            "aspect",
+        );
+    }
+
+    client.finish();
+    assert!(entries(directory.path()).is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn gemini_size_and_aspect_ratio_capabilities() {
+    let flash25 = "gemini-2.5-flash-image";
+    let pro3 = "gemini-3-pro-image";
+    let flash31 = "gemini-3.1-flash-image";
+    let unknown = "gemini-image-smoke";
+    let ids = [flash25, pro3, flash31, unknown];
+    let server = MockServer::start().await;
+    mount_models(&server, &ids).await;
+    let metadata = metadata_proxy(1).await;
+    let directory = tempfile::tempdir().unwrap();
+    let mut client = StdioClient::start(&server, &metadata, directory.path(), "2025-11-25");
+    assert_guidance(&client.tool("guidance", json!({})));
+
+    for ratio in BASE_RATIOS {
+        let expected = gemini_generate_request(flash25, gemini_config(None, Some(ratio)));
+        expect_generate_success(
+            &server,
+            &mut client,
+            directory.path(),
+            flash25,
+            None,
+            Some(ratio),
+            expected,
+        )
+        .await;
+    }
+    for ratio in EXTRA_RATIOS {
+        expect_generate_error(
+            &mut client,
+            directory.path(),
+            flash25,
+            None,
+            Some(ratio),
+            "ratio",
+        );
+    }
+    for size in GEMINI_SIZES {
+        expect_generate_error(
+            &mut client,
+            directory.path(),
+            flash25,
+            Some(size),
+            None,
+            "size",
+        );
+    }
+    {
+        let expected = gemini_generate_request(flash25, None);
+        expect_generate_success(
+            &server,
+            &mut client,
+            directory.path(),
+            flash25,
+            None,
+            None,
+            expected,
+        )
+        .await;
+    }
+
+    for size in ["1K", "2K", "4K"] {
+        for ratio in ["1:1", "16:9", "4:5"] {
+            let expected = gemini_generate_request(pro3, gemini_config(Some(size), Some(ratio)));
+            expect_generate_success(
+                &server,
+                &mut client,
+                directory.path(),
+                pro3,
+                Some(size),
+                Some(ratio),
+                expected,
+            )
+            .await;
+        }
+    }
+    expect_generate_error(
+        &mut client,
+        directory.path(),
+        pro3,
+        Some("512"),
+        None,
+        "size",
+    );
+    for ratio in EXTRA_RATIOS {
+        expect_generate_error(
+            &mut client,
+            directory.path(),
+            pro3,
+            None,
+            Some(ratio),
+            "ratio",
+        );
+    }
+    {
+        let expected = gemini_generate_request(pro3, None);
+        expect_generate_success(
+            &server,
+            &mut client,
+            directory.path(),
+            pro3,
+            None,
+            None,
+            expected,
+        )
+        .await;
+    }
+    {
+        let expected = gemini_generate_request(pro3, gemini_config(Some("2K"), None));
+        expect_generate_success(
+            &server,
+            &mut client,
+            directory.path(),
+            pro3,
+            Some("2K"),
+            None,
+            expected,
+        )
+        .await;
+    }
+
+    for size in GEMINI_SIZES {
+        let expected = gemini_generate_request(flash31, gemini_config(Some(size), None));
+        expect_generate_success(
+            &server,
+            &mut client,
+            directory.path(),
+            flash31,
+            Some(size),
+            None,
+            expected,
+        )
+        .await;
+    }
+    for ratio in ALL_RATIOS {
+        let expected = gemini_generate_request(flash31, gemini_config(None, Some(ratio)));
+        expect_generate_success(
+            &server,
+            &mut client,
+            directory.path(),
+            flash31,
+            None,
+            Some(ratio),
+            expected,
+        )
+        .await;
+    }
+    {
+        let expected = gemini_generate_request(flash31, gemini_config(Some("512"), Some("8:1")));
+        expect_generate_success(
+            &server,
+            &mut client,
+            directory.path(),
+            flash31,
+            Some("512"),
+            Some("8:1"),
+            expected,
+        )
+        .await;
+    }
+    {
+        let expected = gemini_generate_request(flash31, None);
+        expect_generate_success(
+            &server,
+            &mut client,
+            directory.path(),
+            flash31,
+            None,
+            None,
+            expected,
+        )
+        .await;
+    }
+
+    for size in GEMINI_SIZES {
+        let expected = gemini_generate_request(unknown, gemini_config(Some(size), None));
+        expect_generate_success(
+            &server,
+            &mut client,
+            directory.path(),
+            unknown,
+            Some(size),
+            None,
+            expected,
+        )
+        .await;
+    }
+    for ratio in ALL_RATIOS {
+        let expected = gemini_generate_request(unknown, gemini_config(None, Some(ratio)));
+        expect_generate_success(
+            &server,
+            &mut client,
+            directory.path(),
+            unknown,
+            None,
+            Some(ratio),
+            expected,
+        )
+        .await;
+    }
+    {
+        let expected = gemini_generate_request(unknown, gemini_config(Some("2K"), Some("3:4")));
+        expect_generate_success(
+            &server,
+            &mut client,
+            directory.path(),
+            unknown,
+            Some("2K"),
+            Some("3:4"),
+            expected,
+        )
+        .await;
+    }
+    {
+        let expected = gemini_generate_request(unknown, None);
+        expect_generate_success(
+            &server,
+            &mut client,
+            directory.path(),
+            unknown,
+            None,
+            None,
+            expected,
+        )
+        .await;
+    }
+
+    client.finish();
+    assert!(entries(directory.path()).is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn gemini_size_values_must_match_exact_native_tiers() {
+    let models = ["gemini-3.1-flash-image", "gemini-image-smoke"];
+    let server = MockServer::start().await;
+    mount_models(&server, &models).await;
+    let metadata = metadata_proxy(1).await;
+    let directory = tempfile::tempdir().unwrap();
+    let mut client = StdioClient::start(&server, &metadata, directory.path(), "2025-11-25");
+    assert_guidance(&client.tool("guidance", json!({})));
+    for model in models {
+        for invalid_size in ["1k", "2k", "4k", "auto", "1024x1024", "512x512", "", "64"] {
+            expect_generate_error(
+                &mut client,
+                directory.path(),
+                model,
+                Some(invalid_size),
+                None,
+                "size",
+            );
+        }
+    }
+    client.finish();
+    assert!(entries(directory.path()).is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn modify_size_follows_the_same_gpt_family_rules_as_generate() {
+    let legacy = "gpt-image-1";
+    let flexible = "gpt-image-2";
+    let unknown = "gpt-image-smoke";
+    let ids = [legacy, flexible, unknown];
+    let server = MockServer::start().await;
+    mount_models(&server, &ids).await;
+    let metadata = metadata_proxy(1).await;
+    let directory = tempfile::tempdir().unwrap();
+    let source_dir = tempfile::tempdir().unwrap();
+    let input = source_dir.path().join("source.png");
+    let input_bytes = fixture(ImageFormat::Png);
+    fs::write(&input, &input_bytes).unwrap();
+    let mut client = StdioClient::start(&server, &metadata, directory.path(), "2025-11-25");
+    assert_guidance(&client.tool("guidance", json!({})));
+    let bytes = fixture(ImageFormat::Png);
+
+    let cases: [(&str, Vec<&str>, &str); 3] = [
+        (
+            legacy,
+            vec!["auto", "1024x1024", "1536x1024", "1024x1536"],
+            "1600x1024",
+        ),
+        (
+            flexible,
+            vec!["auto", "1600x1024", "1008x1008", "640x1024", "3840x2160"],
+            "320x2048",
+        ),
+        (unknown, vec!["auto", "10000x10000", "50x50"], "1K"),
+    ];
+    for (model, valid_sizes, invalid_size) in cases {
+        for size in &valid_sizes {
+            let mut expected_request = json!({
+                "model": model, "prompt": EDIT_PROMPT, "n": 1, "size": size,
+                "quality": "auto", "output_format": "png",
+                "images": [{"image_url": format!("data:image/png;base64,{}", STANDARD.encode(&input_bytes))}],
+            });
+            if model == legacy {
+                expected_request["input_fidelity"] = json!("high");
+            }
+            let mock = modification_mock()
+                .and(body_json(&expected_request))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "data": [{"b64_json": STANDARD.encode(&bytes)}],
+                })))
+                .expect(1)
+                .mount_as_scoped(&server)
+                .await;
+            let output_dir = tempfile::tempdir_in(directory.path()).unwrap();
+            let output = output_dir.path().join("edited.png");
+            let options = json!({"model": model, "size": size});
+            let result = client.modify(&input, &output, options);
+            structured(&result);
+            drop(mock);
+        }
+        let output_dir = tempfile::tempdir_in(directory.path()).unwrap();
+        let output = output_dir.path().join("edited.png");
+        let options = json!({"model": model, "size": invalid_size});
+        let result = client.modify(&input, &output, options);
+        assert_error(&result, "size");
+        assert!(entries(output_dir.path()).is_empty());
+    }
+
+    let output_dir = tempfile::tempdir_in(directory.path()).unwrap();
+    let output = output_dir.path().join("edited.png");
+    let response = client.rpc(
+        "tools/call",
+        json!({"name": "modify", "arguments": {
+            "model": legacy, "input_path": input, "local_path": output,
+            "prompt": EDIT_PROMPT, "aspect_ratio": "1:1",
+        }}),
+    );
+    assert_schema_rejected(&response);
+    assert!(entries(output_dir.path()).is_empty());
+    drop(output_dir);
+
+    client.finish();
+    assert_eq!(fs::read(&input).unwrap(), input_bytes);
+    assert!(entries(directory.path()).is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rejects_unknown_schema_fields_before_any_request() {
+    let server = MockServer::start().await;
+    let metadata = metadata_proxy(0).await;
+    let directory = tempfile::tempdir().unwrap();
+    let mut client = StdioClient::start(&server, &metadata, directory.path(), "2025-11-25");
+    let output = directory.path().join("schema.png");
+    for changes in [
+        json!({"width": 1024}),
+        json!({"height": 1024}),
+        json!({"aspect_ratio": "1:2"}),
+    ] {
+        let mut arguments = json!({
+            "model": "gpt-image-smoke", "local_path": output, "prompt": PROMPT,
+        });
+        arguments
+            .as_object_mut()
+            .unwrap()
+            .extend(changes.as_object().unwrap().clone());
+        let response = client.rpc(
+            "tools/call",
+            json!({"name": "generate", "arguments": arguments}),
+        );
+        assert_schema_rejected(&response);
+    }
+    let source_dir = tempfile::tempdir().unwrap();
+    let input = source_dir.path().join("source.png");
+    fs::write(&input, fixture(ImageFormat::Png)).unwrap();
+    for changes in [
+        json!({"width": 1024}),
+        json!({"height": 1024}),
+        json!({"aspect_ratio": "1:1"}),
+    ] {
+        let mut arguments = json!({
+            "model": "gpt-image-smoke", "input_path": input, "local_path": output, "prompt": EDIT_PROMPT,
+        });
+        arguments
+            .as_object_mut()
+            .unwrap()
+            .extend(changes.as_object().unwrap().clone());
+        let response = client.rpc(
+            "tools/call",
+            json!({"name": "modify", "arguments": arguments}),
+        );
+        assert_schema_rejected(&response);
+    }
+    client.finish();
+    assert!(server.received_requests().await.unwrap().is_empty());
+    assert!(entries(directory.path()).is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn rejects_existing_destinations_without_api_requests() {
     let server = MockServer::start().await;
     let metadata = metadata_proxy(0).await;
@@ -686,13 +1353,7 @@ async fn rejects_existing_destinations_without_api_requests() {
     let input_bytes = fixture(ImageFormat::Png);
     fs::write(&input, &input_bytes).unwrap();
     for editing in [false, true] {
-        for suffix in [
-            "",
-            ".prompt.json",
-            ".original.png",
-            ".original.jpg",
-            ".original.webp",
-        ] {
+        for suffix in ["", ".prompt.json"] {
             for conflict in [Conflict::File, Conflict::Symlink, Conflict::Directory] {
                 let output_dir = tempfile::tempdir_in(directory.path()).unwrap();
                 let output = output_dir.path().join("asset.png");
@@ -701,7 +1362,7 @@ async fn rejects_existing_destinations_without_api_requests() {
                 let result = if editing {
                     client.modify(&input, &output, json!({}))
                 } else {
-                    client.generate(&output, "gpt-image-smoke", (128, 96))
+                    client.generate(&output, "gpt-image-smoke", None, None)
                 };
                 assert_error(&result, "already exists");
                 conflict.assert_preserved(&existing);
@@ -729,7 +1390,7 @@ async fn rolls_back_when_destinations_appear_during_generation_or_modification()
             kind.create(&path);
             response.clone()
         })
-        .expect(9)
+        .expect(6)
         .mount(&server)
         .await;
     }
@@ -746,7 +1407,6 @@ async fn rolls_back_when_destinations_appear_during_generation_or_modification()
     for editing in [false, true] {
         for (suffix, expected) in [
             ("", "Cannot save image without overwriting"),
-            (".original.png", "Original save failed"),
             (".prompt.json", "Prompt save failed"),
         ] {
             for kind in [Conflict::File, Conflict::Symlink, Conflict::Directory] {
@@ -757,7 +1417,7 @@ async fn rolls_back_when_destinations_appear_during_generation_or_modification()
                 let result = if editing {
                     client.modify(&input, &output, json!({"mask_path": mask}))
                 } else {
-                    client.generate(&output, "gpt-image-smoke", (128, 96))
+                    client.generate(&output, "gpt-image-smoke", None, None)
                 };
                 assert_error(&result, expected);
                 assert!(pending.lock().unwrap().is_none());
@@ -768,7 +1428,7 @@ async fn rolls_back_when_destinations_appear_during_generation_or_modification()
         }
     }
     client.finish();
-    assert_eq!(server.received_requests().await.unwrap().len(), 19);
+    assert_eq!(server.received_requests().await.unwrap().len(), 13);
     assert!(entries(directory.path()).is_empty());
     assert_eq!(entries(source_dir.path()), BTreeSet::from([input, mask]));
 }
@@ -791,11 +1451,8 @@ async fn rejects_invalid_edits_without_requests_or_input_changes() {
         (json!({"model": "gemini-image-smoke"}), "only OpenAI"),
         (json!({"model": "iq-image"}), "only OpenAI"),
         (json!({"prompt": "\n "}), "prompt must contain"),
-        (json!({"width": 128}), "Provide both width and height"),
-        (json!({"height": 96}), "Provide both width and height"),
-        (json!({"width": 63, "height": 96}), "between 64 and 4096"),
-        (json!({"width": 4097, "height": 96}), "between 64 and 4096"),
-        (json!({"width": 64, "height": 4096}), "Aspect ratio"),
+        (json!({"size": "2K"}), "size"),
+        (json!({"size": ""}), "size"),
         (json!({"input_path": "relative.png"}), "absolute"),
         (json!({"input_path": source_dir.path()}), "regular file"),
         (
@@ -832,16 +1489,6 @@ async fn rejects_invalid_edits_without_requests_or_input_changes() {
         assert_eq!(fs::read(&invalid).unwrap(), bytes);
         assert!(entries(directory.path()).is_empty());
     }
-    for (width, height) in [(63, 96), (4097, 96), (64, 1024)] {
-        image::RgbImage::new(width, height).save(&invalid).unwrap();
-        let bytes = fs::read(&invalid).unwrap();
-        assert_error(
-            &client.modify(&invalid, &output, json!({})),
-            "Invalid modification output",
-        );
-        assert_eq!(fs::read(&invalid).unwrap(), bytes);
-        assert!(entries(directory.path()).is_empty());
-    }
     for (field, limit) in [("input_path", 50_000_000), ("mask_path", 4_000_000)] {
         fs::File::create(&invalid).unwrap().set_len(limit).unwrap();
         let mut options = json!({});
@@ -861,11 +1508,28 @@ async fn rejects_invalid_edits_without_requests_or_input_changes() {
             "tools/call",
             json!({"name": "modify", "arguments": arguments}),
         );
-        assert!(response["error"].is_object() || response["result"]["isError"] == true);
+        assert_schema_rejected(&response);
+    }
+    for changes in [
+        json!({"width": 1024}),
+        json!({"height": 1024}),
+        json!({"aspect_ratio": "1:2"}),
+        json!({"unexpected": true}),
+    ] {
+        let mut arguments = base.clone();
+        arguments
+            .as_object_mut()
+            .unwrap()
+            .extend(changes.as_object().unwrap().clone());
+        let response = client.rpc(
+            "tools/call",
+            json!({"name": "modify", "arguments": arguments}),
+        );
+        assert_schema_rejected(&response);
     }
     base["unexpected"] = json!(true);
     let response = client.rpc("tools/call", json!({"name": "modify", "arguments": base}));
-    assert!(response["error"].is_object() || response["result"]["isError"] == true);
+    assert_schema_rejected(&response);
     client.finish();
     assert!(server.received_requests().await.unwrap().is_empty());
     assert!(metadata.received_requests().await.unwrap().is_empty());
