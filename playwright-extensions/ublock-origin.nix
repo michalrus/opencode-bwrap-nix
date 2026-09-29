@@ -5,17 +5,13 @@
 {
   lib,
   stdenvNoCC,
-  fetchzip,
+  src,
 }:
-stdenvNoCC.mkDerivation (finalAttrs: {
+stdenvNoCC.mkDerivation {
   pname = "ublock-origin";
-  version = "1.75.0";
+  inherit (builtins.fromJSON (builtins.readFile "${src}/manifest.json")) version;
 
-  src = fetchzip {
-    url = "https://github.com/gorhill/uBlock/releases/download/${finalAttrs.version}/uBlock0_${finalAttrs.version}.chromium.zip";
-    hash = "sha256-i4IiHZGuA2lZCt6zLiVxvktrT6+ITD6nBpZtvcnF6Qg=";
-    stripRoot = false;
-  };
+  inherit src;
 
   dontConfigure = true;
   dontBuild = true;
@@ -23,7 +19,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   installPhase = ''
     runHook preInstall
     mkdir -p $out
-    cp -r uBlock0.chromium/. $out/
+    cp -r . $out/
     runHook postInstall
   '';
 
@@ -33,4 +29,4 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     license = lib.licenses.gpl3Only;
     platforms = lib.platforms.all;
   };
-})
+}

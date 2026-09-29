@@ -26,6 +26,18 @@
       url = "github:extratone/macOSsystemsounds";
       flake = false;
     };
+    ublock-origin = {
+      url = "https://github.com/gorhill/uBlock/releases/download/1.75.0/uBlock0_1.75.0.chromium.zip";
+      flake = false;
+    };
+    ublock-origin-lite = {
+      url = "https://github.com/uBlockOrigin/uBOL-home/releases/download/2026.926.2202/uBOLite_2026.926.2202.chromium.zip";
+      flake = false;
+    };
+    twocaptcha-solver = {
+      url = "https://github.com/rucaptcha/2captcha-solver/releases/download/v3.7.2/2captcha-solver-chrome-3.7.2.zip";
+      flake = false;
+    };
   };
 
   outputs = inputs: let

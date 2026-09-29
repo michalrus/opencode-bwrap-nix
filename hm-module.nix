@@ -41,9 +41,10 @@
 
   ublockOrigin =
     if playwrightCfg.adblock.lite
-    then pkgs.callPackage ./playwright-extensions/ublock-origin-lite.nix {}
-    else pkgs.callPackage ./playwright-extensions/ublock-origin.nix {};
+    then pkgs.callPackage ./playwright-extensions/ublock-origin-lite.nix {src = inputs.ublock-origin-lite;}
+    else pkgs.callPackage ./playwright-extensions/ublock-origin.nix {src = inputs.ublock-origin;};
   twocaptchaSolver = pkgs.callPackage ./playwright-extensions/2captcha-solver.nix {
+    src = inputs.twocaptcha-solver;
     apiKeyPlaceholder = "@${playwrightCfg.captchaSolver.apiKeyEnv}@";
   };
 

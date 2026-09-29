@@ -4,17 +4,13 @@
 {
   lib,
   stdenvNoCC,
-  fetchzip,
+  src,
 }:
-stdenvNoCC.mkDerivation (finalAttrs: {
+stdenvNoCC.mkDerivation {
   pname = "ublock-origin-lite";
-  version = "2026.926.2202";
+  inherit (builtins.fromJSON (builtins.readFile "${src}/manifest.json")) version;
 
-  src = fetchzip {
-    url = "https://github.com/uBlockOrigin/uBOL-home/releases/download/${finalAttrs.version}/uBOLite_${finalAttrs.version}.chromium.zip";
-    hash = "sha256-i/JMXBLXi2P5SQ9Fz0VsfmnVW44aAl2Sa9j/FtmtUKs=";
-    stripRoot = false;
-  };
+  inherit src;
 
   dontConfigure = true;
   dontBuild = true;
@@ -32,4 +28,4 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     license = lib.licenses.gpl3Only;
     platforms = lib.platforms.all;
   };
-})
+}

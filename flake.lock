@@ -220,7 +220,10 @@
         "opencode-anthropic-auth": "opencode-anthropic-auth",
         "opencode-notifier": "opencode-notifier",
         "playwright-mcp": "playwright-mcp",
-        "serena": "serena"
+        "serena": "serena",
+        "twocaptcha-solver": "twocaptcha-solver",
+        "ublock-origin": "ublock-origin",
+        "ublock-origin-lite": "ublock-origin-lite"
       }
     },
     "serena": {
@@ -297,6 +300,45 @@
         "owner": "numtide",
         "repo": "treefmt-nix",
         "type": "github"
+      }
+    },
+    "twocaptcha-solver": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1732288914,
+        "narHash": "sha256-WsePMlqEHliU8+IV/JyxGK+VSNMrGfoiKsy9WcuwhmU=",
+        "type": "tarball",
+        "url": "https://github.com/rucaptcha/2captcha-solver/releases/download/v3.7.2/2captcha-solver-chrome-3.7.2.zip"
+      },
+      "original": {
+        "type": "tarball",
+        "url": "https://github.com/rucaptcha/2captcha-solver/releases/download/v3.7.2/2captcha-solver-chrome-3.7.2.zip"
+      }
+    },
+    "ublock-origin": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1789567484,
+        "narHash": "sha256-14JGbOvgFhVZSxt92TtLX6YiJ4V6/HVS8P+cpGVx6HU=",
+        "type": "tarball",
+        "url": "https://github.com/gorhill/uBlock/releases/download/1.75.0/uBlock0_1.75.0.chromium.zip"
+      },
+      "original": {
+        "type": "tarball",
+        "url": "https://github.com/gorhill/uBlock/releases/download/1.75.0/uBlock0_1.75.0.chromium.zip"
+      }
+    },
+    "ublock-origin-lite": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1790460150,
+        "narHash": "sha256-i/JMXBLXi2P5SQ9Fz0VsfmnVW44aAl2Sa9j/FtmtUKs=",
+        "type": "tarball",
+        "url": "https://github.com/uBlockOrigin/uBOL-home/releases/download/2026.926.2202/uBOLite_2026.926.2202.chromium.zip"
+      },
+      "original": {
+        "type": "tarball",
+        "url": "https://github.com/uBlockOrigin/uBOL-home/releases/download/2026.926.2202/uBOLite_2026.926.2202.chromium.zip"
       }
     },
     "uv2nix": {

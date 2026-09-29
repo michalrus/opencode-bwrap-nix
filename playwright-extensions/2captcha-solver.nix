@@ -8,8 +8,8 @@
 {
   lib,
   stdenvNoCC,
-  fetchzip,
   jq,
+  src,
   apiKeyPlaceholder ? "@TWOCAPTCHA_API_KEY@",
   # Widgets solved without a click on the extension’s button. reCAPTCHA v3 is
   # left out on purpose: it is invisible and would be billed on every page load.
@@ -29,15 +29,11 @@
     "autoSolveMTCaptcha"
   ],
 }:
-stdenvNoCC.mkDerivation (finalAttrs: {
+stdenvNoCC.mkDerivation {
   pname = "2captcha-solver";
-  version = "3.7.2";
+  inherit (builtins.fromJSON (builtins.readFile "${src}/manifest.json")) version;
 
-  src = fetchzip {
-    url = "https://github.com/rucaptcha/2captcha-solver/releases/download/v${finalAttrs.version}/2captcha-solver-chrome-${finalAttrs.version}.zip";
-    hash = "sha256-WsePMlqEHliU8+IV/JyxGK+VSNMrGfoiKsy9WcuwhmU=";
-    stripRoot = false;
-  };
+  inherit src;
 
   nativeBuildInputs = [jq];
 
@@ -79,4 +75,4 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     license = lib.licenses.mit;
     platforms = lib.platforms.all;
   };
-})
+}
