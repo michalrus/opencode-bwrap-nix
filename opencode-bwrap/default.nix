@@ -5,6 +5,7 @@
   bun2nix,
   serena ? null,
   playwright-mcp ? null,
+  playwright ? {},
   image-generation-mcp ? null,
   imageGeneration ? {},
   plugins,
@@ -52,6 +53,61 @@
   ];
 
   configFormat = pkgs.formats.json {};
+
+  # Every MCP process gets a private Chromium with a throwaway on-disk profile,
+  # removed when the process exits. This keeps concurrent opencode sessions
+  # isolated from each other while still allowing unpacked extensions, which
+  # Chromium refuses to load into Playwright's in-memory (`--isolated`) contexts.
+  playwrightFontsConf = pkgs.makeFontsConf {
+    fontDirectories = with pkgs; [
+      dejavu_fonts
+      freefont_ttf
+      gyre-fonts
+      liberation_ttf
+      unifont
+      noto-fonts-color-emoji
+    ];
+    impureFontDirectories = [];
+    includes = ["${pkgs.fontconfig.out}/etc/fonts/conf.d"];
+  };
+
+  playwrightUserAgent =
+    if playwright.userAgent or null != null
+    then playwright.userAgent
+    else "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${lib.versions.major pkgs.chromium.version}.0.0.0 Safari/537.36";
+
+  playwrightExtensions = playwright.extensions or [];
+  playwrightExtensionEnvPlaceholders = playwright.extensionEnvPlaceholders or [];
+
+  playwrightMcpConfig = configFormat.generate "playwright-mcp-config.json" {
+    browser = {
+      browserName = "chromium";
+      launchOptions = {
+        executablePath = lib.getExe pkgs.chromium;
+        headless = true;
+        chromiumSandbox = true;
+        args =
+          [
+            "--user-agent=${playwrightUserAgent}"
+          ]
+          ++ lib.optional (playwrightExtensions != []) "--load-extension=@PLAYWRIGHT_EXTENSIONS@"
+          ++ (playwright.extraArgs or []);
+      };
+      userDataDir = "@PLAYWRIGHT_USER_DATA_DIR@";
+    };
+  };
+
+  playwrightMcpWrapper = pkgs.writeShellApplication {
+    name = "playwright-mcp-ephemeral";
+    runtimeInputs = with pkgs; [coreutils findutils gnugrep gnused jq];
+    text = ''
+      export PLAYWRIGHT_MCP=${lib.escapeShellArg (lib.getExe playwright-mcp)}
+      export PLAYWRIGHT_MCP_CONFIG=${lib.escapeShellArg "${playwrightMcpConfig}"}
+      export PLAYWRIGHT_EXTENSIONS=${lib.escapeShellArg (lib.concatMapStrings (ext: "${ext}\n") playwrightExtensions)}
+      export PLAYWRIGHT_PLACEHOLDERS=${lib.escapeShellArg (lib.concatMapStrings (var: "${var}\n") playwrightExtensionEnvPlaceholders)}
+      ${builtins.readFile ./playwright-mcp-ephemeral.sh}
+    '';
+  };
 
   evalConfig = modules:
     (lib.evalModules {
@@ -134,28 +190,10 @@
         // lib.optionalAttrs (playwright-mcp != null) {
           playwright = {
             type = "local";
-            command = [
-              (lib.getExe playwright-mcp)
-              "--executable-path"
-              (lib.getExe pkgs.chromium)
-              "--headless"
-              "--isolated"
-              "--sandbox"
-            ];
+            command = [(lib.getExe playwrightMcpWrapper)];
             environment = {
               PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
-              FONTCONFIG_FILE = toString (pkgs.makeFontsConf {
-                fontDirectories = with pkgs; [
-                  dejavu_fonts
-                  freefont_ttf
-                  gyre-fonts
-                  liberation_ttf
-                  unifont
-                  noto-fonts-color-emoji
-                ];
-                impureFontDirectories = [];
-                includes = ["${pkgs.fontconfig.out}/etc/fonts/conf.d"];
-              });
+              FONTCONFIG_FILE = toString playwrightFontsConf;
             };
             enabled = true;
           };
@@ -179,7 +217,9 @@
       experimental = {
         disable_paste_summary = true;
       };
-      instructions = ["${preamblePath}"];
+      instructions =
+        ["${preamblePath}"]
+        ++ lib.optional (playwright-mcp != null && (playwright.captchaSolverEnabled or false)) "${../playwright-extensions/captcha-solver-instructions.md}";
       # We're running in a strict sandbox, so let's relax the default permissions.
       # Set at top level so all agents (build, plan, custom) inherit them.
       permission = {
@@ -359,6 +399,14 @@
         [ -e "$p" ] && bwrap_opts+=( --ro-bind "$p" "$p" )
       done
 
+      # The host time zone, otherwise the sandbox (and every website the
+      # headless browser visits) sees UTC. `TZ` and `TZDIR` are forwarded
+      # below: glibc needs `TZDIR` to resolve a zone name in `TZ`, ICU (in
+      # Chromium and Node) reads `TZ` first, then falls back to this symlink.
+      if localtime=$(readlink -f /etc/localtime 2>/dev/null) && [ -f "$localtime" ]; then
+        bwrap_opts+=( --symlink "$localtime" /etc/localtime )
+      fi
+
       # Host env vars forwarded into the sandbox (skipped if unset).
       host_env_forward=(
         COLORTERM
@@ -367,11 +415,20 @@
         LOCALE_ARCHIVE
         LOCALE_ARCHIVE_2_27
         TERM
+        TZ
+        TZDIR
         USER
       )
       for v in "''${host_env_forward[@]}"; do
         [ -n "''${!v+x}" ] && bwrap_opts+=( --setenv "$v" "''${!v}" )
       done
+
+      # A zone name in `TZ` (e.g. `Europe/Warsaw` on a UTC server) needs a
+      # zoneinfo database to resolve against, or glibc silently falls back to
+      # UTC. Point at Nixpkgs' tzdata when the host does not say otherwise.
+      if [ -n "''${TZ+x}" ] && [ -z "''${TZDIR+x}" ]; then
+        bwrap_opts+=( --setenv TZDIR ${pkgs.tzdata}/share/zoneinfo )
+      fi
 
       for d in "''${persist_dirs[@]}" ; do
         mkdir -p "$sandbox_home"/"$d"
@@ -531,7 +588,7 @@
       };
       passthru = {
         bwrap-escape-hatch = bwrap-escape-hatch // {inherit escapeHatchShims;};
-        inherit plugins config tuiConfig playwright-mcp image-generation-mcp;
+        inherit plugins config tuiConfig playwright-mcp playwrightMcpWrapper playwrightMcpConfig image-generation-mcp;
       };
     };
   };

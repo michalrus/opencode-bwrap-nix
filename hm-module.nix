@@ -35,6 +35,28 @@
 
   plugins = pkgs.callPackage ./plugins {inherit inputs bun2nix;};
 
+  # -- Playwright browser extensions ---------------------------------------
+
+  playwrightCfg = cfg.playwright;
+
+  ublockOriginLite = pkgs.callPackage ./playwright-extensions/ublock-origin-lite.nix {};
+  twocaptchaSolver = pkgs.callPackage ./playwright-extensions/2captcha-solver.nix {
+    apiKeyPlaceholder = "@${playwrightCfg.captchaSolver.apiKeyEnv}@";
+  };
+
+  playwrightExtensions =
+    lib.optional playwrightCfg.adblock.enable ublockOriginLite
+    ++ lib.optional playwrightCfg.captchaSolver.enable twocaptchaSolver
+    ++ playwrightCfg.extensions;
+
+  playwrightExtensionEnvPlaceholders =
+    lib.optional playwrightCfg.captchaSolver.enable playwrightCfg.captchaSolver.apiKeyEnv
+    ++ playwrightCfg.extensionEnvPlaceholders;
+
+  captchaSolverEnvFiles = lib.optionalAttrs (playwrightCfg.captchaSolver.enable && playwrightCfg.captchaSolver.apiKeyFile != null) {
+    ${playwrightCfg.captchaSolver.apiKeyEnv} = playwrightCfg.captchaSolver.apiKeyFile;
+  };
+
   escapeHatch = pkgs.callPackage ./bwrap-escape-hatch {};
 
   environmentPreambleScript = pkgs.callPackage ./preamble/environment.nix {};
@@ -149,6 +171,12 @@
       if cfg.playwright.enable
       then playwright-mcp
       else null;
+    playwright = {
+      inherit (playwrightCfg) userAgent extraArgs;
+      extensions = playwrightExtensions;
+      extensionEnvPlaceholders = playwrightExtensionEnvPlaceholders;
+      captchaSolverEnabled = playwrightCfg.captchaSolver.enable;
+    };
     image-generation-mcp =
       if cfg.imageGeneration.enable
       then pkgs.callPackage ./image-generation-mcp {}
@@ -172,7 +200,8 @@
       // lib.optionalAttrs (!cfg.pasteAttachments) {OPENCODE_DISABLE_PASTE_ATTACHMENTS = "true";}
       // lib.optionalAttrs (cfg.databaseName != null) {OPENCODE_DB = cfg.databaseName;};
     commandPaths = cfg.commands;
-    inherit (cfg) dataDirPrefix extraConfig extraTuiConfig extraEnvFiles extraPackages extraFwdEnv;
+    extraEnvFiles = captchaSolverEnvFiles // cfg.extraEnvFiles;
+    inherit (cfg) dataDirPrefix extraConfig extraTuiConfig extraPackages extraFwdEnv;
   };
 
   # -- Option helpers (DRY) ------------------------------------------------
@@ -348,8 +377,82 @@ in {
 
     playwright = {
       enable =
-        mkEnableOption "Playwright MCP with headless Nixpkgs Chromium and isolated browser sessions"
+        mkEnableOption "Playwright MCP with headless Nixpkgs Chromium in a throwaway per-session profile"
         // {default = true;};
+
+      adblock = {
+        enable = mkEnableOption "uBlock Origin Lite in the Playwright browser";
+      };
+
+      captchaSolver = {
+        enable = mkEnableOption ''
+          the 2Captcha solver extension in the Playwright browser. It solves
+          image captchas, reCAPTCHA v2, GeeTest, Arkose Labs, Cloudflare
+          Turnstile, Amazon WAF, and others on its own as they appear, billed
+          to the 2Captcha account behind the API key (hCaptcha is not
+          supported by 2Captcha). The agent's instructions gain a section on
+          waiting for the solver
+        '';
+
+        apiKeyFile = mkOption {
+          type = types.nullOr types.str;
+          default = ".config/opencode/2captcha.key";
+          example = ".secrets/2captcha";
+          description = ''
+            File holding the 2Captcha API key, relative to the persistent
+            sandbox home, read when the sandbox starts (like `extraEnvFiles`).
+            Set to null to supply `apiKeyEnv` yourself through `extraEnvFiles`
+            or `extraFwdEnv`.
+          '';
+        };
+
+        apiKeyEnv = mkOption {
+          type = types.str;
+          default = "TWOCAPTCHA_API_KEY";
+          description = "Name of the environment variable that carries the 2Captcha API key inside the sandbox.";
+        };
+      };
+
+      extensions = mkOption {
+        type = types.listOf types.package;
+        default = [];
+        example = literalExpression "[ pkgs.my-unpacked-extension ]";
+        description = ''
+          Additional unpacked Chromium extensions (directories containing
+          `manifest.json`) loaded into every browser session. Each is copied
+          to a private writable directory before Chromium starts.
+        '';
+      };
+
+      extensionEnvPlaceholders = mkOption {
+        type = types.listOf types.str;
+        default = [];
+        example = ["MY_EXTENSION_TOKEN"];
+        description = ''
+          Environment variable names whose values replace the literal
+          `@NAME@` tokens inside the staged copies of `extensions` at startup.
+          Lets an extension carry a secret (supplied through `extraEnvFiles`
+          or `extraFwdEnv`) without the secret entering the Nix store.
+        '';
+      };
+
+      userAgent = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        example = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
+        description = ''
+          Browser user agent. The default mirrors headed Chromium of the same
+          major version, instead of the `HeadlessChrome/…` token that many
+          sites reject outright.
+        '';
+      };
+
+      extraArgs = mkOption {
+        type = types.listOf types.str;
+        default = [];
+        example = ["--lang=pl-PL"];
+        description = "Additional Chromium command-line switches.";
+      };
     };
 
     imageGeneration = {
@@ -474,6 +577,29 @@ in {
       {
         assertion = cfg.databaseName == null || builtins.match "[a-zA-Z0-9][a-zA-Z0-9._-]*" cfg.databaseName != null;
         message = "programs.opencode-bwrap.databaseName: must be a bare file name under OpenCode's data directory (no path separators)";
+      }
+      {
+        assertion = lib.all (name: builtins.match "[a-zA-Z_][a-zA-Z_0-9]*" name != null) cfg.playwright.extensionEnvPlaceholders;
+        message = "programs.opencode-bwrap.playwright.extensionEnvPlaceholders: every entry must be a valid POSIX variable name ([a-zA-Z_][a-zA-Z_0-9]*)";
+      }
+      {
+        assertion = builtins.match "[a-zA-Z_][a-zA-Z_0-9]*" cfg.playwright.captchaSolver.apiKeyEnv != null;
+        message = "programs.opencode-bwrap.playwright.captchaSolver.apiKeyEnv must be a valid environment variable name";
+      }
+      {
+        assertion = let
+          path = cfg.playwright.captchaSolver.apiKeyFile;
+        in
+          path == null || lib.all (segment: segment != "" && segment != "." && segment != "..") (lib.splitString "/" path);
+        message = "programs.opencode-bwrap.playwright.captchaSolver.apiKeyFile: must be a normalized relative path under the persistent sandbox home (no empty, '.' or '..' segments)";
+      }
+      {
+        assertion = !(cfg.playwright.adblock.enable || cfg.playwright.captchaSolver.enable || cfg.playwright.extensions != []) || cfg.playwright.enable;
+        message = "programs.opencode-bwrap.playwright: adblock, captchaSolver, and extensions require playwright.enable";
+      }
+      {
+        assertion = lib.all (arg: lib.hasPrefix "--" arg && !lib.hasPrefix "--user-data-dir" arg && !lib.hasPrefix "--load-extension" arg && !lib.hasPrefix "--user-agent" arg) cfg.playwright.extraArgs;
+        message = "programs.opencode-bwrap.playwright.extraArgs: entries must be `--switches`; use the dedicated options for the profile directory, extensions, and user agent";
       }
     ];
 

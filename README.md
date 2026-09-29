@@ -63,34 +63,49 @@ sandbox instead of starting an interactive shell.
 
 ## Home Manager options
 
-| Option                     | Type             | Description                                                       |
-| -------------------------- | ---------------- | ----------------------------------------------------------------- |
-| `enable`                   | bool             | Enable the sandbox wrapper                                        |
-| `preamble`                 | path             | Instructions file mounted into the sandbox                        |
-| `preambleScripts`          | list             | Ordered executable packages or paths appended at runtime          |
-| `dataDirPrefix`            | string           | Relative path under `$HOME` for persistent sandbox state          |
-| `bashrc` / `zshrc`         | path             | Shell configs sourced inside the sandbox                          |
-| `commands`                 | attrs of paths   | Global command names and their Markdown source files              |
-| `extraPackages`            | list of packages | Additional packages on the sandbox PATH                           |
-| `extraEnv`                 | attrs of strings | Static env vars set in the sandbox                                |
-| `extraEnvFiles`            | attrs of strings | Env vars read from files in the persistent sandbox home           |
-| `extraFwdEnv`              | list of strings  | Host env vars forwarded into the sandbox                          |
-| `maxContextTokens`         | positive integer | Maximum model context and input tokens (default: 224\*1024)       |
-| `pasteAttachments`         | bool             | Turn pasted image/SVG/PDF paths into attachments (default: false) |
-| `databaseName`             | string or null   | Session-history database file (default: `opencode.db`)            |
-| `treefmt.enable`           | bool             | Use treefmt as exclusive formatter (default: true)                |
-| `serena.enable`            | bool             | Serena MCP integration for code navigation (default: true)        |
-| `playwright.enable`        | bool             | Playwright MCP with headless Nixpkgs Chromium (default: true)     |
-| `notifications.enable`     | bool             | Desktop notifications + sounds via escape hatch (default: true)   |
-| `notifications.sounds.*`   | path or null     | Per-event sound files (converted to WAV at build time)            |
-| `notifications.messages.*` | string           | Per-event notification body templates                             |
-| `notifications.extraRules` | list of rules    | Additional escape-hatch allow-list entries                        |
+| Option                                | Type             | Description                                                                      |
+| ------------------------------------- | ---------------- | -------------------------------------------------------------------------------- |
+| `enable`                              | bool             | Enable the sandbox wrapper                                                       |
+| `preamble`                            | path             | Instructions file mounted into the sandbox                                       |
+| `preambleScripts`                     | list             | Ordered executable packages or paths appended at runtime                         |
+| `dataDirPrefix`                       | string           | Relative path under `$HOME` for persistent sandbox state                         |
+| `bashrc` / `zshrc`                    | path             | Shell configs sourced inside the sandbox                                         |
+| `commands`                            | attrs of paths   | Global command names and their Markdown source files                             |
+| `extraPackages`                       | list of packages | Additional packages on the sandbox PATH                                          |
+| `extraEnv`                            | attrs of strings | Static env vars set in the sandbox                                               |
+| `extraEnvFiles`                       | attrs of strings | Env vars read from files in the persistent sandbox home                          |
+| `extraFwdEnv`                         | list of strings  | Host env vars forwarded into the sandbox                                         |
+| `maxContextTokens`                    | positive integer | Maximum model context and input tokens (default: 224\*1024)                      |
+| `pasteAttachments`                    | bool             | Turn pasted image/SVG/PDF paths into attachments (default: false)                |
+| `databaseName`                        | string or null   | Session-history database file (default: `opencode.db`)                           |
+| `treefmt.enable`                      | bool             | Use treefmt as exclusive formatter (default: true)                               |
+| `serena.enable`                       | bool             | Serena MCP integration for code navigation (default: true)                       |
+| `playwright.enable`                   | bool             | Playwright MCP with headless Nixpkgs Chromium (default: true)                    |
+| `playwright.adblock.enable`           | bool             | uBlock Origin Lite in the browser (default: false)                               |
+| `playwright.captchaSolver.enable`     | bool             | 2Captcha solver extension in the browser (default: false)                        |
+| `playwright.captchaSolver.apiKeyFile` | string or null   | 2Captcha key file in the sandbox home (default: `.config/opencode/2captcha.key`) |
+| `playwright.captchaSolver.apiKeyEnv`  | string           | Env var carrying the key (default: `TWOCAPTCHA_API_KEY`)                         |
+| `playwright.extensions`               | list of packages | Extra unpacked Chromium extensions loaded into every session                     |
+| `playwright.extensionEnvPlaceholders` | list of strings  | Env var names substituted for `@NAME@` inside extensions                         |
+| `playwright.userAgent`                | string or null   | Browser user agent (default: headed Chromium of the same version)                |
+| `playwright.extraArgs`                | list of strings  | Additional Chromium switches                                                     |
+| `notifications.enable`                | bool             | Desktop notifications + sounds via escape hatch (default: true)                  |
+| `notifications.sounds.*`              | path or null     | Per-event sound files (converted to WAV at build time)                           |
+| `notifications.messages.*`            | string           | Per-event notification body templates                                            |
+| `notifications.extraRules`            | list of rules    | Additional escape-hatch allow-list entries                                       |
 
 ### Playwright MCP
 
 `playwright.enable` defaults to `true`. The MCP server uses headless
-`pkgs.chromium`, not Google Chrome. Each MCP session has an isolated browser
-profile, so concurrent sessions do not share cookies or logins.
+`pkgs.chromium`, not Google Chrome. Each MCP process starts its own Chromium
+with a profile in a temporary directory that is deleted when the process
+exits, so concurrent sessions do not share cookies, logins, or tabs.
+
+The browser reports the user agent of a headed Chromium of the same major
+version instead of `HeadlessChrome/…`, and `navigator.webdriver` is `false`.
+Override the string with `playwright.userAgent`. The sandbox also carries the
+host time zone (`/etc/localtime`, `TZ`, `TZDIR`), so pages see the same zone
+as the host.
 
 Fontconfig uses the standard NixOS desktop font set: DejaVu, FreeFont,
 TeX Gyre, Liberation, GNU Unifont, and Noto Color Emoji. The fonts and
@@ -106,6 +121,69 @@ To disable the integration:
 ```nix
 programs.opencode-bwrap.playwright.enable = false;
 ```
+
+#### Ad blocking
+
+```nix
+programs.opencode-bwrap.playwright.adblock.enable = true;
+```
+
+Loads [uBlock Origin Lite](https://github.com/uBlockOrigin/uBOL-home) (the
+manifest v3 build) with its default filter lists into every browser session.
+
+#### CAPTCHA solving
+
+```nix
+programs.opencode-bwrap.playwright.captchaSolver.enable = true;
+```
+
+Loads the [2Captcha solver](https://github.com/rucaptcha/2captcha-solver)
+extension. It solves image captchas, reCAPTCHA v2 (including invisible),
+GeeTest v3/v4, KeyCAPTCHA, Arkose Labs (FunCaptcha), Lemin, Yandex, Capy,
+Amazon WAF, Cloudflare Turnstile, and MTCaptcha automatically as they appear.
+reCAPTCHA v3 is left on manual because it is invisible and would be billed on
+every page load. 2Captcha does not support hCaptcha.
+
+Put the API key from <https://2captcha.com> into the persistent sandbox home:
+
+```
+install -m 600 /dev/stdin ~/.local/share/opencode-bwrap/home/.config/opencode/2captcha.key <<< 'YOUR_KEY'
+```
+
+The sandbox reads this file at start (`captchaSolver.apiKeyFile`, relative to
+the sandbox home) and injects the key into the session's private copy of the
+extension, so it never enters the Nix store. Set `apiKeyFile = null` to provide
+`captchaSolver.apiKeyEnv` through `extraEnvFiles` or `extraFwdEnv` instead.
+
+With the solver enabled, the agent's instructions gain a section that tells it
+to wait for the extension's `Solve with 2Captcha` control to reach `solved`
+instead of trying to solve the challenge itself, and to stop after three
+minutes because every attempt costs money.
+
+#### Custom extensions
+
+`playwright.extensions` lists further unpacked Chromium extensions
+(directories with a `manifest.json`, for example from `pkgs.fetchzip`) to load
+into every browser session. Before Chromium starts, each one is copied into the
+session's temporary directory, and every `@NAME@` token inside the copy, for
+each `NAME` in `playwright.extensionEnvPlaceholders`, is replaced with the
+value of that environment variable. Combined with `extraEnvFiles`, this lets an
+extension carry an API key that never enters the Nix store:
+
+```nix
+programs.opencode-bwrap = {
+  extraEnvFiles.MY_EXTENSION_TOKEN = ".config/opencode/my-extension.token";
+  playwright = {
+    # An unpacked extension whose config reads `token: "@MY_EXTENSION_TOKEN@"`.
+    extensions = [pkgs.my-unpacked-extension];
+    extensionEnvPlaceholders = ["MY_EXTENSION_TOKEN"];
+  };
+};
+```
+
+Only manifest v3 extensions load in current Chromium. An extension that opens
+its options page on first install does so in every session; strip `options_ui`
+from its manifest at build time to avoid the extra tab.
 
 ### Custom commands
 
@@ -189,6 +267,7 @@ Supported systems: `x86_64-linux`, `aarch64-linux`.
 flake.nix                 Flake entry point
 hm-module.nix             Home Manager module (options + systemd units)
 opencode-bwrap/           Sandbox wrapper package (Nix + shell + seccomp)
+playwright-extensions/    Browser extensions for the Playwright MCP
 bwrap-escape-hatch/       Escape-hatch service (Rust)
 plugins/                  opencode plugins (anthropic-auth, notifier)
 ```
