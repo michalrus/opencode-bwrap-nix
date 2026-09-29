@@ -35,7 +35,11 @@
       flake = false;
     };
     twocaptcha-solver = {
-      url = "https://github.com/rucaptcha/2captcha-solver/releases/download/v3.7.2/2captcha-solver-chrome-3.7.2.zip";
+      # GitHub releases stop at 3.7.2; newer versions are only in the Chrome Web
+      # Store. This is where the update service redirects for id
+      # ifibfemgeogfhoebkmokieepdoobkbpo, version 3.7.4.
+      #url = "https://github.com/rucaptcha/2captcha-solver/releases/download/v3.7.2/2captcha-solver-chrome-3.7.2.zip";
+      url = "file+https://clients2.googleusercontent.com/crx/blobs/AZPVhcQggW9qkp9JsJTfK1mZyPEb8Wdc3YSdckG3lVJK3uhX3HFw6cZ5VDv9cy2mFd4ZUVAI8anfVcm_rkizu0WUZjGkKKfEeRrlSmbiDiQrJc7I9FJKZZvPz5Ut47okAMwAxlKa5fDvdbhzybg948P2NDdAZRNJ2D4h/IFIBFEMGEOGFHOEBKMOKIEEPDOOBKBPO_3_7_4_0.crx";
       flake = false;
     };
   };

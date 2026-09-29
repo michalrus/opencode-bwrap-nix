@@ -305,14 +305,13 @@
     "twocaptcha-solver": {
       "flake": false,
       "locked": {
-        "lastModified": 1732288914,
-        "narHash": "sha256-WsePMlqEHliU8+IV/JyxGK+VSNMrGfoiKsy9WcuwhmU=",
-        "type": "tarball",
-        "url": "https://github.com/rucaptcha/2captcha-solver/releases/download/v3.7.2/2captcha-solver-chrome-3.7.2.zip"
+        "narHash": "sha256-fs8gsU65PKhDPDoX23yiTdYZc2LGwoeCd4CZnHNYtl0=",
+        "type": "file",
+        "url": "https://clients2.googleusercontent.com/crx/blobs/AZPVhcQggW9qkp9JsJTfK1mZyPEb8Wdc3YSdckG3lVJK3uhX3HFw6cZ5VDv9cy2mFd4ZUVAI8anfVcm_rkizu0WUZjGkKKfEeRrlSmbiDiQrJc7I9FJKZZvPz5Ut47okAMwAxlKa5fDvdbhzybg948P2NDdAZRNJ2D4h/IFIBFEMGEOGFHOEBKMOKIEEPDOOBKBPO_3_7_4_0.crx"
       },
       "original": {
-        "type": "tarball",
-        "url": "https://github.com/rucaptcha/2captcha-solver/releases/download/v3.7.2/2captcha-solver-chrome-3.7.2.zip"
+        "type": "file",
+        "url": "https://clients2.googleusercontent.com/crx/blobs/AZPVhcQggW9qkp9JsJTfK1mZyPEb8Wdc3YSdckG3lVJK3uhX3HFw6cZ5VDv9cy2mFd4ZUVAI8anfVcm_rkizu0WUZjGkKKfEeRrlSmbiDiQrJc7I9FJKZZvPz5Ut47okAMwAxlKa5fDvdbhzybg948P2NDdAZRNJ2D4h/IFIBFEMGEOGFHOEBKMOKIEEPDOOBKBPO_3_7_4_0.crx"
       }
     },
     "ublock-origin": {

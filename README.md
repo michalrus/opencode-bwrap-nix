@@ -168,7 +168,8 @@ programs.opencode-bwrap.playwright.captchaSolver.enable = true;
 Loads the [2Captcha solver](https://github.com/rucaptcha/2captcha-solver)
 extension. It solves image captchas, reCAPTCHA v2 (including invisible),
 GeeTest v3/v4, KeyCAPTCHA, Arkose Labs (FunCaptcha), Lemin, Yandex, Capy,
-Amazon WAF, Cloudflare Turnstile, and MTCaptcha automatically as they appear.
+Amazon WAF, Cloudflare Turnstile, MTCaptcha, and CaptchaFox automatically as
+they appear.
 reCAPTCHA v3 is left on manual because it is invisible and would be billed on
 every page load. 2Captcha does not support hCaptcha.
 
