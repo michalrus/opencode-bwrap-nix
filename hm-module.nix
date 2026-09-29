@@ -39,15 +39,22 @@
 
   playwrightCfg = cfg.playwright;
 
-  ublockOriginLite = pkgs.callPackage ./playwright-extensions/ublock-origin-lite.nix {};
+  ublockOrigin =
+    if playwrightCfg.adblock.lite
+    then pkgs.callPackage ./playwright-extensions/ublock-origin-lite.nix {}
+    else pkgs.callPackage ./playwright-extensions/ublock-origin.nix {};
   twocaptchaSolver = pkgs.callPackage ./playwright-extensions/2captcha-solver.nix {
     apiKeyPlaceholder = "@${playwrightCfg.captchaSolver.apiKeyEnv}@";
   };
 
   playwrightExtensions =
-    lib.optional playwrightCfg.adblock.enable ublockOriginLite
+    lib.optional playwrightCfg.adblock.enable ublockOrigin
     ++ lib.optional playwrightCfg.captchaSolver.enable twocaptchaSolver
     ++ playwrightCfg.extensions;
+
+  playwrightAllowManifestV2 =
+    playwrightCfg.allowManifestV2
+    || (playwrightCfg.adblock.enable && !playwrightCfg.adblock.lite);
 
   playwrightExtensionEnvPlaceholders =
     lib.optional playwrightCfg.captchaSolver.enable playwrightCfg.captchaSolver.apiKeyEnv
@@ -175,6 +182,7 @@
       inherit (playwrightCfg) userAgent extraArgs;
       extensions = playwrightExtensions;
       extensionEnvPlaceholders = playwrightExtensionEnvPlaceholders;
+      allowManifestV2 = playwrightAllowManifestV2;
       captchaSolverEnabled = playwrightCfg.captchaSolver.enable;
     };
     image-generation-mcp =
@@ -381,7 +389,29 @@ in {
         // {default = true;};
 
       adblock = {
-        enable = mkEnableOption "uBlock Origin Lite in the Playwright browser";
+        enable = mkEnableOption "uBlock Origin in the Playwright browser";
+
+        lite = mkOption {
+          type = types.bool;
+          default = false;
+          description = ''
+            Load uBlock Origin Lite (manifest v3) instead of the full uBlock
+            Origin (manifest v2). The full version blocks more, but depends on
+            `allowManifestV2`, which it switches on by itself.
+          '';
+        };
+      };
+
+      allowManifestV2 = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Start Chromium with `--enable-features=AllowLegacyMV2Extensions` so
+          that unpacked manifest v2 extensions still load after the MV2
+          deprecation. Only affects `--load-extension` (unpacked) extensions.
+          Undocumented developer switch: Chromium may drop it in any release,
+          in which case the affected extensions silently stop loading.
+        '';
       };
 
       captchaSolver = {
@@ -594,12 +624,16 @@ in {
         message = "programs.opencode-bwrap.playwright.captchaSolver.apiKeyFile: must be a normalized relative path under the persistent sandbox home (no empty, '.' or '..' segments)";
       }
       {
-        assertion = !(cfg.playwright.adblock.enable || cfg.playwright.captchaSolver.enable || cfg.playwright.extensions != []) || cfg.playwright.enable;
-        message = "programs.opencode-bwrap.playwright: adblock, captchaSolver, and extensions require playwright.enable";
+        assertion = !(cfg.playwright.adblock.enable || cfg.playwright.captchaSolver.enable || cfg.playwright.extensions != [] || cfg.playwright.allowManifestV2) || cfg.playwright.enable;
+        message = "programs.opencode-bwrap.playwright: adblock, captchaSolver, extensions, and allowManifestV2 require playwright.enable";
       }
       {
         assertion = lib.all (arg: lib.hasPrefix "--" arg && !lib.hasPrefix "--user-data-dir" arg && !lib.hasPrefix "--load-extension" arg && !lib.hasPrefix "--user-agent" arg) cfg.playwright.extraArgs;
         message = "programs.opencode-bwrap.playwright.extraArgs: entries must be `--switches`; use the dedicated options for the profile directory, extensions, and user agent";
+      }
+      {
+        assertion = !playwrightAllowManifestV2 || lib.all (arg: !lib.hasPrefix "--enable-features" arg) cfg.playwright.extraArgs;
+        message = "programs.opencode-bwrap.playwright.extraArgs: Chromium keeps only the last `--enable-features` switch, which would drop `AllowLegacyMV2Extensions`; leave it out when manifest v2 extensions are enabled";
       }
     ];
 

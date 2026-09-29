@@ -79,6 +79,15 @@
   playwrightExtensions = playwright.extensions or [];
   playwrightExtensionEnvPlaceholders = playwright.extensionEnvPlaceholders or [];
 
+  # Chromium honours only the last `--enable-features` switch, and Playwright
+  # already passes one of its own (`CDPScreenshotNewSurface`, see
+  # `chromiumSwitches.ts`), so it has to be repeated here alongside ours.
+  # `AllowLegacyMV2Extensions` is the developer escape hatch that lets unpacked
+  # manifest v2 extensions load after the MV2 deprecation.
+  playwrightEnabledFeatures =
+    ["CDPScreenshotNewSurface"]
+    ++ lib.optional (playwright.allowManifestV2 or false) "AllowLegacyMV2Extensions";
+
   playwrightMcpConfig = configFormat.generate "playwright-mcp-config.json" {
     browser = {
       browserName = "chromium";
@@ -91,6 +100,7 @@
             "--user-agent=${playwrightUserAgent}"
           ]
           ++ lib.optional (playwrightExtensions != []) "--load-extension=@PLAYWRIGHT_EXTENSIONS@"
+          ++ lib.optional (playwright.allowManifestV2 or false) "--enable-features=${lib.concatStringsSep "," playwrightEnabledFeatures}"
           ++ (playwright.extraArgs or []);
       };
       userDataDir = "@PLAYWRIGHT_USER_DATA_DIR@";

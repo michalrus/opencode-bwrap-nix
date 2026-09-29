@@ -81,7 +81,9 @@ sandbox instead of starting an interactive shell.
 | `treefmt.enable`                      | bool             | Use treefmt as exclusive formatter (default: true)                               |
 | `serena.enable`                       | bool             | Serena MCP integration for code navigation (default: true)                       |
 | `playwright.enable`                   | bool             | Playwright MCP with headless Nixpkgs Chromium (default: true)                    |
-| `playwright.adblock.enable`           | bool             | uBlock Origin Lite in the browser (default: false)                               |
+| `playwright.adblock.enable`           | bool             | uBlock Origin in the browser (default: false)                                    |
+| `playwright.adblock.lite`             | bool             | uBlock Origin Lite (manifest v3) instead of full uBlock Origin (default: false)  |
+| `playwright.allowManifestV2`          | bool             | Let unpacked manifest v2 extensions load (default: false)                        |
 | `playwright.captchaSolver.enable`     | bool             | 2Captcha solver extension in the browser (default: false)                        |
 | `playwright.captchaSolver.apiKeyFile` | string or null   | 2Captcha key file in the sandbox home (default: `.config/opencode/2captcha.key`) |
 | `playwright.captchaSolver.apiKeyEnv`  | string           | Env var carrying the key (default: `TWOCAPTCHA_API_KEY`)                         |
@@ -128,8 +130,34 @@ programs.opencode-bwrap.playwright.enable = false;
 programs.opencode-bwrap.playwright.adblock.enable = true;
 ```
 
-Loads [uBlock Origin Lite](https://github.com/uBlockOrigin/uBOL-home) (the
-manifest v3 build) with its default filter lists into every browser session.
+Loads [uBlock Origin](https://github.com/gorhill/uBlock) with its default
+filter lists into every browser session. uBlock Origin is a manifest v2
+extension, so this also turns on `playwright.allowManifestV2` (see below).
+
+Set `playwright.adblock.lite = true` to load
+[uBlock Origin Lite](https://github.com/uBlockOrigin/uBOL-home) instead. It is
+manifest v3 and needs no Chromium switches, but blocks less: it has no dynamic
+filtering and cannot apply the full filter syntax.
+
+#### Manifest v2 extensions
+
+```nix
+programs.opencode-bwrap.playwright.allowManifestV2 = true;
+```
+
+Chromium no longer loads manifest v2 extensions by default, and the
+`ExtensionManifestV2Availability` enterprise policy that used to override
+this was removed in Chromium 139. What remains is the developer switch
+`--enable-features=AllowLegacyMV2Extensions`, which exempts unpacked
+(`--load-extension`) extensions only. This option adds it. The switch is
+undocumented and Chromium may drop it in any release; when that happens, the
+affected extensions stop loading without an error. Store-installed extensions
+are not covered, which is why uBlock Origin left the Chrome Web Store.
+
+The throwaway profile also starts in extension developer mode. An extension
+that reloads itself on first start (uBlock Origin does) comes back as a
+regular unpacked extension, and Chromium disables those outside developer
+mode.
 
 #### CAPTCHA solving
 
@@ -181,9 +209,9 @@ programs.opencode-bwrap = {
 };
 ```
 
-Only manifest v3 extensions load in current Chromium. An extension that opens
-its options page on first install does so in every session; strip `options_ui`
-from its manifest at build time to avoid the extra tab.
+Manifest v2 extensions need `playwright.allowManifestV2`. An extension that
+opens its options page on first install does so in every session; strip
+`options_ui` from its manifest at build time to avoid the extra tab.
 
 ### Custom commands
 

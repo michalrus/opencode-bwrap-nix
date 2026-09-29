@@ -1,6 +1,6 @@
 # uBlock Origin Lite (manifest v3) as an unpacked Chromium extension, prepared
-# for `programs.opencode-bwrap.playwright.extensions`. The classic uBlock Origin
-# is manifest v2 and no longer loads into current Chromium.
+# for `programs.opencode-bwrap.playwright.extensions`. Loads without any
+# Chromium switches, unlike the manifest v2 uBlock Origin in `ublock-origin.nix`.
 {
   lib,
   stdenvNoCC,

@@ -59,6 +59,15 @@ while IFS= read -r ext; do
   load_extension="${load_extension:+$load_extension,}$ext_dir"
 done <<<"${PLAYWRIGHT_EXTENSIONS-}"
 
+# An extension that reloads itself on first start (uBlock Origin does, see
+# uBlockOrigin/uBlock-issues#1547) comes back as an "unpacked" rather than a
+# "command line" extension, and Chromium disables unpacked extensions unless
+# the profile is in developer mode.
+if [ -n "$load_extension" ]; then
+  mkdir -m 700 "$profile_dir/Default"
+  jq -n '{extensions: {ui: {developer_mode: true}}}' >"$profile_dir/Default/Preferences"
+fi
+
 config_file="$state_dir/config.json"
 jq \
   --arg profile "$profile_dir" \
