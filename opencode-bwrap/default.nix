@@ -5,6 +5,7 @@
   bun2nix,
   serena ? null,
   playwright-mcp ? null,
+  mcp-session-mux ? null,
   playwright ? {},
   image-generation-mcp ? null,
   imageGeneration ? {},
@@ -30,7 +31,8 @@
     prune = true;
   },
   providerJSON ? {},
-}: let
+}:
+assert lib.assertMsg (playwright-mcp == null || mcp-session-mux != null) "opencode-bwrap: `playwright-mcp` needs `mcp-session-mux` to run one browser per opencode session"; let
   unsafe = nixpkgs-opencode.legacyPackages.${pkgs.stdenv.hostPlatform.system}.opencode.overrideAttrs (prev: {
     patches =
       (prev.patches or [])
@@ -38,6 +40,7 @@
         ./opencode--instructions_command.patch
         ./opencode--max-context-tokens.patch
         ./opencode--disable-paste-attachments.patch
+        ./opencode--mcp-session-meta.patch
       ];
   });
 
@@ -54,10 +57,15 @@
 
   configFormat = pkgs.formats.json {};
 
-  # Every MCP process gets a private Chromium with a throwaway on-disk profile,
-  # removed when the process exits. This keeps concurrent opencode sessions
-  # isolated from each other while still allowing unpacked extensions, which
-  # Chromium refuses to load into Playwright's in-memory (`--isolated`) contexts.
+  # opencode starts a single Playwright MCP process and shares it between the
+  # main session and every subagent, which would make them all fight over one
+  # browser and its tabs. Our opencode patch stamps each `tools/call` with the
+  # session ID, and `mcp-session-mux` routes it to a `playwright-mcp-ephemeral`
+  # child started for that session: a private Chromium with a throwaway on-disk
+  # profile, removed when the child exits. On-disk (not `--isolated` in-memory)
+  # profiles are what lets Chromium load unpacked extensions. A session's child
+  # is stopped after `sessionIdleTimeout` seconds without tool calls; the next
+  # call starts a fresh one with no tabs.
   playwrightFontsConf = pkgs.makeFontsConf {
     fontDirectories = with pkgs; [
       dejavu_fonts
@@ -118,6 +126,21 @@
       ${builtins.readFile ./playwright-mcp-ephemeral.sh}
     '';
   };
+
+  # The WebMCP bridge adds tools at runtime as pages expose them; the mux
+  # serves a fixed tool list, so keep the list static.
+  playwrightMcpCommand = [(lib.getExe playwrightMcpWrapper) "--no-webmcp"];
+
+  # Playwright MCP's server info and tool list, captured once at build time so
+  # that at runtime the mux answers `initialize` and `tools/list` itself and
+  # Node.js only starts when a session makes its first browser call.
+  playwrightMcpManifest =
+    pkgs.runCommand "playwright-mcp-manifest.json" {
+      nativeBuildInputs = [mcp-session-mux];
+      env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
+    } ''
+      mcp-session-mux --probe -- ${lib.escapeShellArgs playwrightMcpCommand} >"$out"
+    '';
 
   evalConfig = modules:
     (lib.evalModules {
@@ -200,7 +223,18 @@
         // lib.optionalAttrs (playwright-mcp != null) {
           playwright = {
             type = "local";
-            command = [(lib.getExe playwrightMcpWrapper)];
+            command =
+              [
+                (lib.getExe mcp-session-mux)
+                "--idle-timeout"
+                (toString (playwright.sessionIdleTimeout or 1800))
+                "--meta-key"
+                "ai.opencode/sessionID"
+                "--manifest"
+                (toString playwrightMcpManifest)
+                "--"
+              ]
+              ++ playwrightMcpCommand;
             environment = {
               PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
               FONTCONFIG_FILE = toString playwrightFontsConf;
@@ -229,6 +263,7 @@
       };
       instructions =
         ["${preamblePath}"]
+        ++ lib.optional (playwright-mcp != null) "${./playwright-instructions.md}"
         ++ lib.optional (playwright-mcp != null && (playwright.captchaSolverEnabled or false)) "${../playwright-extensions/captcha-solver-instructions.md}";
       # We're running in a strict sandbox, so let's relax the default permissions.
       # Set at top level so all agents (build, plan, custom) inherit them.
@@ -598,7 +633,7 @@
       };
       passthru = {
         bwrap-escape-hatch = bwrap-escape-hatch // {inherit escapeHatchShims;};
-        inherit plugins config tuiConfig playwright-mcp playwrightMcpWrapper playwrightMcpConfig image-generation-mcp;
+        inherit plugins config tuiConfig playwright-mcp mcp-session-mux playwrightMcpWrapper playwrightMcpConfig playwrightMcpManifest image-generation-mcp;
       };
     };
   };

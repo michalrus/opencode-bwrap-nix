@@ -1,0 +1,108 @@
+--- a/packages/opencode/src/mcp/catalog.ts
++++ b/packages/opencode/src/mcp/catalog.ts
+@@ -11,6 +11,17 @@
+ const DEFAULT_TIMEOUT = 30_000
+ const MAX_LIST_PAGES = 1_000
+ 
++/**
++ * `_meta` key under which every `tools/call` carries the calling session's ID,
++ * so that a server can keep per-session state (e.g. one browser per session)
++ * while all sessions of an instance share a single client connection.
++ */
++export const SESSION_META_KEY = "ai.opencode/sessionID"
++
++export function callMeta(sessionID: string) {
++  return { [SESSION_META_KEY]: sessionID }
++}
++
+ const TolerantListToolsResultSchema = ListToolsResultSchema.extend({
+   tools: ToolSchema.omit({ outputSchema: true }).array(),
+ })
+@@ -39,7 +50,7 @@
+   return listTools(client, timeout ?? DEFAULT_TIMEOUT).pipe(Effect.catch(() => Effect.void))
+ }
+ 
+-export function convertTool(mcpTool: MCPToolDef, client: Client, timeout?: number): Tool {
++export function convertTool(mcpTool: MCPToolDef, client: Client, timeout?: number, sessionID?: string): Tool {
+   const inputSchema: JSONSchema7 = {
+     ...(mcpTool.inputSchema as JSONSchema7),
+     type: "object",
+@@ -55,6 +66,7 @@
+         {
+           name: mcpTool.name,
+           arguments: (args || {}) as Record<string, unknown>,
++          ...(sessionID !== undefined && { _meta: callMeta(sessionID) }),
+         },
+         CallToolResultSchema,
+         {
+--- a/packages/opencode/src/session/tools.ts
++++ b/packages/opencode/src/session/tools.ts
+@@ -388,7 +388,7 @@
+   if (flags.experimentalCodeMode) return tools
+ 
+   for (const [key, entry] of Object.entries(yield* mcp.tools())) {
+-    const item = McpCatalog.convertTool(entry.def, entry.client, entry.timeout)
++    const item = McpCatalog.convertTool(entry.def, entry.client, entry.timeout, input.session.id)
+     const execute = item.execute
+     if (!execute) continue
+ 
+--- a/packages/opencode/src/tool/code-mode.ts
++++ b/packages/opencode/src/tool/code-mode.ts
+@@ -148,7 +148,11 @@
+     // Deliberately mirrors McpCatalog.convertTool's transport call so the MCP service stays free of tool-loop concerns.
+     return yield* Effect.promise(async () => {
+       const raw = await input.entry.tool.client.callTool(
+-        { name: input.entry.tool.def.name, arguments: input.args },
++        {
++          name: input.entry.tool.def.name,
++          arguments: input.args,
++          _meta: McpCatalog.callMeta(input.ctx.sessionID),
++        },
+         CallToolResultSchema,
+         {
+           resetTimeoutOnProgress: true,
+--- a/packages/opencode/test/mcp/catalog.test.ts
++++ b/packages/opencode/test/mcp/catalog.test.ts
+@@ -48,6 +48,42 @@
+       content: [{ type: "text", text: JSON.stringify(structuredContent) }],
+     })
+   })
++
++  test("attaches the session ID to _meta of every call", async () => {
++    const calls: unknown[] = []
++    const client = {
++      callTool: async (params: unknown) => {
++        calls.push(params)
++        return { content: [] }
++      },
++    } as unknown as Client
++    const converted = McpCatalog.convertTool(mcpTool(), client, undefined, "ses_123")
++
++    await converted.execute?.({ url: "https://example.com" }, options)
++
++    expect(calls).toEqual([
++      {
++        name: "screenshot",
++        arguments: { url: "https://example.com" },
++        _meta: { [McpCatalog.SESSION_META_KEY]: "ses_123" },
++      },
++    ])
++  })
++
++  test("omits _meta without a session", async () => {
++    const calls: unknown[] = []
++    const client = {
++      callTool: async (params: unknown) => {
++        calls.push(params)
++        return { content: [] }
++      },
++    } as unknown as Client
++    const converted = McpCatalog.convertTool(mcpTool(), client)
++
++    await converted.execute?.({}, options)
++
++    expect(calls).toEqual([{ name: "screenshot", arguments: {} }])
++  })
+ })
+ 
+ test("preserves output schema validation across paginated tool discovery", async () => {

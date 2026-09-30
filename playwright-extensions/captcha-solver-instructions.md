@@ -1,6 +1,6 @@
-# Web browsing and CAPTCHAs
+# CAPTCHAs
 
-The Playwright browser runs headless with a private, throwaway profile per session and the 2Captcha solver extension.
+The browser has the 2Captcha solver extension.
 
 - When a page shows a CAPTCHA (reCAPTCHA, Turnstile, GeeTest, Arkose Labs/FunCaptcha, Amazon WAF, image puzzles), the extension solves it on its own. Do not try to solve it yourself, and do not click the widget.
 - Wait with `browser_wait_for` (about 30 s), then take a new snapshot. The `Solve with 2Captcha` control in the page reports progress in its `data-state` attribute: `ready` → `solving` → `solved`. Repeat the wait while it is `solving`.

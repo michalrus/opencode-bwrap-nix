@@ -179,8 +179,12 @@
       if cfg.playwright.enable
       then playwright-mcp
       else null;
+    mcp-session-mux =
+      if cfg.playwright.enable
+      then pkgs.callPackage ./mcp-session-mux {}
+      else null;
     playwright = {
-      inherit (playwrightCfg) userAgent extraArgs;
+      inherit (playwrightCfg) userAgent extraArgs sessionIdleTimeout;
       extensions = playwrightExtensions;
       extensionEnvPlaceholders = playwrightExtensionEnvPlaceholders;
       allowManifestV2 = playwrightAllowManifestV2;
@@ -388,6 +392,18 @@ in {
       enable =
         mkEnableOption "Playwright MCP with headless Nixpkgs Chromium in a throwaway per-session profile"
         // {default = true;};
+
+      sessionIdleTimeout = mkOption {
+        type = types.ints.unsigned;
+        default = 1800;
+        example = 300;
+        description = ''
+          Seconds after an opencode session's (or subagent's) last Playwright
+          tool call before its browser and throwaway profile are closed. The
+          next call starts a fresh browser with no tabs. 0 keeps browsers open
+          until opencode exits.
+        '';
+      };
 
       adblock = {
         enable = mkEnableOption "uBlock Origin in the Playwright browser";

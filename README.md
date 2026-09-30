@@ -20,7 +20,8 @@ with a Home Manager module for declarative installation.
   by default).
 - Provides [Playwright MCP](https://github.com/microsoft/playwright-mcp) for
   headless browser automation with Nixpkgs Chromium inside the sandbox
-  (enabled by default).
+  (enabled by default), with a separate browser for every opencode session
+  and subagent.
 - Supports [direnv](https://direnv.net/) + nix-direnv for per-project Nix
   dev shells.
 
@@ -81,6 +82,7 @@ sandbox instead of starting an interactive shell.
 | `treefmt.enable`                      | bool             | Use treefmt as exclusive formatter (default: true)                               |
 | `serena.enable`                       | bool             | Serena MCP integration for code navigation (default: true)                       |
 | `playwright.enable`                   | bool             | Playwright MCP with headless Nixpkgs Chromium (default: true)                    |
+| `playwright.sessionIdleTimeout`       | unsigned integer | Seconds without tool calls before a session's browser closes (default: 1800)     |
 | `playwright.adblock.enable`           | bool             | uBlock Origin in the browser (default: false)                                    |
 | `playwright.adblock.lite`             | bool             | uBlock Origin Lite (manifest v3) instead of full uBlock Origin (default: false)  |
 | `playwright.allowManifestV2`          | bool             | Let unpacked manifest v2 extensions load (default: false)                        |
@@ -99,9 +101,33 @@ sandbox instead of starting an interactive shell.
 ### Playwright MCP
 
 `playwright.enable` defaults to `true`. The MCP server uses headless
-`pkgs.chromium`, not Google Chrome. Each MCP process starts its own Chromium
-with a profile in a temporary directory that is deleted when the process
-exits, so concurrent sessions do not share cookies, logins, or tabs.
+`pkgs.chromium`, not Google Chrome.
+
+opencode starts one process per MCP server and shares it between the main
+session and all subagents. For Playwright that would mean one browser, where
+every subagent sees the same tabs and steals the "current tab" from the others.
+Instead, `mcp-session-mux` ([`mcp-session-mux/`](mcp-session-mux/)) sits in
+front of Playwright MCP. A patch to opencode adds the session ID to the
+`_meta` of every MCP tool call, and the mux starts a separate Playwright MCP
+process, and with it a separate Chromium, for each session ID it sees. Each
+Chromium has a profile in a temporary directory that is deleted when the
+process exits, so sessions and subagents do not share cookies, logins, or
+tabs, and their tool calls run in parallel. A browser that receives no tool
+calls for `playwright.sessionIdleTimeout` seconds (default: 30 minutes) is
+closed; the next call starts a fresh one with no tabs. Set the option to `0`
+to keep browsers open until opencode exits.
+
+The mux answers `initialize` and `tools/list` from a manifest that the Nix
+build captures by probing Playwright MCP once, so a session that never touches
+the browser costs about 7 MiB for the mux itself, and Node.js and Chromium
+start only on the first browser call.
+
+The agent's instructions gain a section
+([`opencode-bwrap/playwright-instructions.md`](opencode-bwrap/playwright-instructions.md))
+that explains the per-session browser and asks the agent to call
+`browser_close` when a browsing task is done. That closes the session's
+Chromium at once, about 1 GiB of memory, instead of waiting for the idle
+timeout; the next browser call starts a fresh one.
 
 The browser reports the user agent of a headed Chromium of the same major
 version instead of `HeadlessChrome/…`, and `navigator.webdriver` is `false`.
@@ -284,6 +310,7 @@ specialize broader repository instructions.
 
 ```
 nix build -L .#opencode-bwrap      # main sandboxed wrapper
+nix build -L .#mcp-session-mux     # per-session MCP proxy (runs its tests)
 nix build -L .#preamble-environment # default runtime preamble
 nix build -L .#preamble-project-instructions
 ```
@@ -297,6 +324,8 @@ flake.nix                 Flake entry point
 hm-module.nix             Home Manager module (options + systemd units)
 opencode-bwrap/           Sandbox wrapper package (Nix + shell + seccomp)
 playwright-extensions/    Browser extensions for the Playwright MCP
+mcp-session-mux/          Per-session MCP server proxy (Rust)
+image-generation-mcp/     Image generation MCP for CLIProxyAPI (Rust)
 bwrap-escape-hatch/       Escape-hatch service (Rust)
 plugins/                  opencode plugins (anthropic-auth, notifier)
 ```
