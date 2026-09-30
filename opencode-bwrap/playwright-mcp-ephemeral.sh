@@ -68,6 +68,8 @@ if [ -n "$load_extension" ]; then
   jq -n '{extensions: {ui: {developer_mode: true}}}' >"$profile_dir/Default/Preferences"
 fi
 
+jq -n '{dns_over_https: {mode: "off"}}' >"$profile_dir/Local State"
+
 config_file="$state_dir/config.json"
 jq \
   --arg profile "$profile_dir" \
