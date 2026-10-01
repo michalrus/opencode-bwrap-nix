@@ -13,7 +13,7 @@
   in
     pkgs.stdenv.mkDerivation rec {
       pname = "opencode-anthropic-auth";
-      version = (builtins.fromJSON (builtins.readFile "${src}/package.json")).version;
+      inherit (builtins.fromJSON (builtins.readFile "${src}/package.json")) version;
 
       inherit src;
 
@@ -52,7 +52,7 @@
 
   opencode-notifier = pkgs.stdenv.mkDerivation {
     pname = "opencode-notifier";
-    version = (builtins.fromJSON (builtins.readFile "${inputs.opencode-notifier}/package.json")).version;
+    inherit (builtins.fromJSON (builtins.readFile "${inputs.opencode-notifier}/package.json")) version;
 
     src = inputs.opencode-notifier;
 
