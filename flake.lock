@@ -23,6 +23,18 @@
         "type": "github"
       }
     },
+    "camoufox": {
+      "flake": false,
+      "locked": {
+        "narHash": "sha256-HtXr/op+rEMNsXbVf8zGE4rRfkvPkFLxqGtnYFFLWXg=",
+        "type": "file",
+        "url": "https://raw.githubusercontent.com/daijro/camoufox/refs/tags/v156.0.1-beta.33/README.md"
+      },
+      "original": {
+        "type": "file",
+        "url": "https://raw.githubusercontent.com/daijro/camoufox/refs/tags/v156.0.1-beta.33/README.md"
+      }
+    },
     "flake-parts": {
       "inputs": {
         "nixpkgs-lib": [
@@ -214,6 +226,7 @@
     "root": {
       "inputs": {
         "bun2nix": "bun2nix",
+        "camoufox": "camoufox",
         "macos-system-sounds": "macos-system-sounds",
         "nixpkgs": "nixpkgs",
         "nixpkgs-opencode": "nixpkgs-opencode",
@@ -222,8 +235,7 @@
         "playwright-mcp": "playwright-mcp",
         "serena": "serena",
         "twocaptcha-solver": "twocaptcha-solver",
-        "ublock-origin": "ublock-origin",
-        "ublock-origin-lite": "ublock-origin-lite"
+        "ublock-origin": "ublock-origin"
       }
     },
     "serena": {
@@ -305,39 +317,27 @@
     "twocaptcha-solver": {
       "flake": false,
       "locked": {
-        "narHash": "sha256-fs8gsU65PKhDPDoX23yiTdYZc2LGwoeCd4CZnHNYtl0=",
-        "type": "file",
-        "url": "https://clients2.googleusercontent.com/crx/blobs/AZPVhcQggW9qkp9JsJTfK1mZyPEb8Wdc3YSdckG3lVJK3uhX3HFw6cZ5VDv9cy2mFd4ZUVAI8anfVcm_rkizu0WUZjGkKKfEeRrlSmbiDiQrJc7I9FJKZZvPz5Ut47okAMwAxlKa5fDvdbhzybg948P2NDdAZRNJ2D4h/IFIBFEMGEOGFHOEBKMOKIEEPDOOBKBPO_3_7_4_0.crx"
+        "lastModified": 312764400,
+        "narHash": "sha256-6w256suOnmlBlTzpWg04ehEthfAVrbQzeYU9MDrcwT8=",
+        "type": "tarball",
+        "url": "https://addons.mozilla.org/firefox/downloads/file/4353807/2captcha_solver-3.7.1.xpi"
       },
       "original": {
-        "type": "file",
-        "url": "https://clients2.googleusercontent.com/crx/blobs/AZPVhcQggW9qkp9JsJTfK1mZyPEb8Wdc3YSdckG3lVJK3uhX3HFw6cZ5VDv9cy2mFd4ZUVAI8anfVcm_rkizu0WUZjGkKKfEeRrlSmbiDiQrJc7I9FJKZZvPz5Ut47okAMwAxlKa5fDvdbhzybg948P2NDdAZRNJ2D4h/IFIBFEMGEOGFHOEBKMOKIEEPDOOBKBPO_3_7_4_0.crx"
+        "type": "tarball",
+        "url": "https://addons.mozilla.org/firefox/downloads/file/4353807/2captcha_solver-3.7.1.xpi"
       }
     },
     "ublock-origin": {
       "flake": false,
       "locked": {
-        "lastModified": 1789567484,
-        "narHash": "sha256-14JGbOvgFhVZSxt92TtLX6YiJ4V6/HVS8P+cpGVx6HU=",
+        "lastModified": 312764400,
+        "narHash": "sha256-A52zLUkBLkDhniL+QpyKGlxGguhdu2jH14MkPHAbMJw=",
         "type": "tarball",
-        "url": "https://github.com/gorhill/uBlock/releases/download/1.75.0/uBlock0_1.75.0.chromium.zip"
+        "url": "https://github.com/gorhill/uBlock/releases/download/1.75.0/uBlock0_1.75.0.firefox.signed.xpi"
       },
       "original": {
         "type": "tarball",
-        "url": "https://github.com/gorhill/uBlock/releases/download/1.75.0/uBlock0_1.75.0.chromium.zip"
-      }
-    },
-    "ublock-origin-lite": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1790460150,
-        "narHash": "sha256-i/JMXBLXi2P5SQ9Fz0VsfmnVW44aAl2Sa9j/FtmtUKs=",
-        "type": "tarball",
-        "url": "https://github.com/uBlockOrigin/uBOL-home/releases/download/2026.926.2202/uBOLite_2026.926.2202.chromium.zip"
-      },
-      "original": {
-        "type": "tarball",
-        "url": "https://github.com/uBlockOrigin/uBOL-home/releases/download/2026.926.2202/uBOLite_2026.926.2202.chromium.zip"
+        "url": "https://github.com/gorhill/uBlock/releases/download/1.75.0/uBlock0_1.75.0.firefox.signed.xpi"
       }
     },
     "uv2nix": {

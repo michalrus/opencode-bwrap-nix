@@ -1,10 +1,16 @@
-# Runs one Playwright MCP server on a private headless Chromium whose profile
+#!/usr/bin/env bash
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# Runs one Playwright MCP server on a private headless Camoufox whose profile
 # lives in a temporary directory that is removed when the server exits.
 #
 # Inputs (set by the Nix wrapper):
 #   PLAYWRIGHT_MCP            path to the playwright-mcp executable
 #   PLAYWRIGHT_MCP_CONFIG     JSON config template with `@PLAYWRIGHT_…@` tokens
-#   PLAYWRIGHT_EXTENSIONS     newline-separated unpacked extension directories
+#   PLAYWRIGHT_CAMOU_CONFIG   JSON fingerprint for Camoufox, without `addons`
+#   PLAYWRIGHT_EXTENSIONS     newline-separated unpacked add-on directories
 #   PLAYWRIGHT_PLACEHOLDERS   newline-separated env var names; every `@NAME@`
 #                             inside the staged extensions becomes `$NAME`
 
@@ -16,7 +22,7 @@ cleanup() {
   rm -rf -- "$state_dir"
 }
 
-# Forward termination to the MCP child so its Chromium exits first and the
+# Forward termination to the MCP child so its browser exits first and the
 # EXIT trap can then remove a directory nothing holds open anymore.
 # shellcheck disable=SC2329 # invoked by the traps below
 forward() {
@@ -31,11 +37,10 @@ trap forward TERM INT HUP
 profile_dir="$state_dir/profile"
 mkdir -m 700 "$profile_dir"
 
-# Extensions come from the read-only Nix store, but Chromium wants to write
-# into unpacked extension directories, and some carry secrets that must never
-# enter the store: stage a private copy and fill in the placeholders at
+# Add-ons come from the read-only Nix store, and some carry secrets that must
+# never enter the store: stage a private copy and fill in the placeholders at
 # startup.
-load_extension=
+addons=()
 index=0
 while IFS= read -r ext; do
   [ -n "$ext" ] || continue
@@ -56,32 +61,16 @@ while IFS= read -r ext; do
       xargs -0 -r sed -i "s|@$var@|$replacement|g"
   done <<<"${PLAYWRIGHT_PLACEHOLDERS-}"
 
-  load_extension="${load_extension:+$load_extension,}$ext_dir"
+  addons+=("$ext_dir")
 done <<<"${PLAYWRIGHT_EXTENSIONS-}"
 
-# An extension that reloads itself on first start (uBlock Origin does, see
-# uBlockOrigin/uBlock-issues#1547) comes back as an "unpacked" rather than a
-# "command line" extension, and Chromium disables unpacked extensions unless
-# the profile is in developer mode.
-if [ -n "$load_extension" ]; then
-  mkdir -m 700 "$profile_dir/Default"
-  jq -n '{extensions: {ui: {developer_mode: true}}}' >"$profile_dir/Default/Preferences"
-fi
-
-jq -n '{dns_over_https: {mode: "off"}}' >"$profile_dir/Local State"
+# Camoufox installs the `addons` of its config as temporary add-ons when the
+# first window opens. Playwright passes its own environment on to the browser.
+CAMOU_CONFIG=$(jq -c '. + {addons: $ARGS.positional}' "$PLAYWRIGHT_CAMOU_CONFIG" --args "${addons[@]}")
+export CAMOU_CONFIG
 
 config_file="$state_dir/config.json"
-jq \
-  --arg profile "$profile_dir" \
-  --arg extensions "$load_extension" \
-  '
-    .browser.userDataDir = $profile
-    | .browser.launchOptions.args |= map(
-        if . == "--load-extension=@PLAYWRIGHT_EXTENSIONS@"
-        then "--load-extension=" + $extensions
-        else . end
-      )
-  ' "$PLAYWRIGHT_MCP_CONFIG" >"$config_file"
+jq --arg profile "$profile_dir" '.browser.userDataDir = $profile' "$PLAYWRIGHT_MCP_CONFIG" >"$config_file"
 
 # Background jobs get `/dev/null` as stdin; the MCP speaks JSON-RPC over
 # ours, so pass it on explicitly.

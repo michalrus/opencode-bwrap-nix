@@ -6,6 +6,8 @@
 }: let
   inherit (lib) mkEnableOption mkOption mkIf types literalExpression;
 
+  configFormat = pkgs.formats.json {};
+
   cfg = config.programs.opencode-bwrap;
   notifCfg = cfg.notifications;
   inherit (pkgs.stdenv.hostPlatform) system;
@@ -39,10 +41,7 @@
 
   playwrightCfg = cfg.playwright;
 
-  ublockOrigin =
-    if playwrightCfg.adblock.lite
-    then pkgs.callPackage ./playwright-extensions/ublock-origin-lite.nix {src = inputs.ublock-origin-lite;}
-    else pkgs.callPackage ./playwright-extensions/ublock-origin.nix {src = inputs.ublock-origin;};
+  ublockOrigin = pkgs.callPackage ./playwright-extensions/ublock-origin.nix {src = inputs.ublock-origin;};
   twocaptchaSolver = pkgs.callPackage ./playwright-extensions/2captcha-solver.nix {
     src = inputs.twocaptcha-solver;
     apiKeyPlaceholder = "@${playwrightCfg.captchaSolver.apiKeyEnv}@";
@@ -52,10 +51,6 @@
     lib.optional playwrightCfg.adblock.enable ublockOrigin
     ++ lib.optional playwrightCfg.captchaSolver.enable twocaptchaSolver
     ++ playwrightCfg.extensions;
-
-  playwrightAllowManifestV2 =
-    playwrightCfg.allowManifestV2
-    || (playwrightCfg.adblock.enable && !playwrightCfg.adblock.lite);
 
   playwrightExtensionEnvPlaceholders =
     lib.optional playwrightCfg.captchaSolver.enable playwrightCfg.captchaSolver.apiKeyEnv
@@ -184,10 +179,9 @@
       then pkgs.callPackage ./mcp-session-mux {}
       else null;
     playwright = {
-      inherit (playwrightCfg) userAgent extraArgs sessionIdleTimeout;
+      inherit (playwrightCfg) package userAgent fingerprint prefs extraArgs sessionIdleTimeout;
       extensions = playwrightExtensions;
       extensionEnvPlaceholders = playwrightExtensionEnvPlaceholders;
-      allowManifestV2 = playwrightAllowManifestV2;
       captchaSolverEnabled = playwrightCfg.captchaSolver.enable;
     };
     image-generation-mcp =
@@ -390,8 +384,19 @@ in {
 
     playwright = {
       enable =
-        mkEnableOption "Playwright MCP with headless Nixpkgs Chromium in a throwaway per-session profile"
+        mkEnableOption "Playwright MCP with headless Camoufox in a throwaway per-session profile"
         // {default = true;};
+
+      package = mkOption {
+        type = types.package;
+        default = pkgs.callPackage ./camoufox {};
+        defaultText = literalExpression "camoufox from this flake";
+        description = ''
+          The Camoufox package. Playwright drives it through Juggler, which
+          only Firefox builds patched for Playwright have; a stock Firefox does
+          not work.
+        '';
+      };
 
       sessionIdleTimeout = mkOption {
         type = types.ints.unsigned;
@@ -405,31 +410,7 @@ in {
         '';
       };
 
-      adblock = {
-        enable = mkEnableOption "uBlock Origin in the Playwright browser";
-
-        lite = mkOption {
-          type = types.bool;
-          default = false;
-          description = ''
-            Load uBlock Origin Lite (manifest v3) instead of the full uBlock
-            Origin (manifest v2). The full version blocks more, but depends on
-            `allowManifestV2`, which it switches on by itself.
-          '';
-        };
-      };
-
-      allowManifestV2 = mkOption {
-        type = types.bool;
-        default = false;
-        description = ''
-          Start Chromium with `--enable-features=AllowLegacyMV2Extensions` so
-          that unpacked manifest v2 extensions still load after the MV2
-          deprecation. Only affects `--load-extension` (unpacked) extensions.
-          Undocumented developer switch: Chromium may drop it in any release,
-          in which case the affected extensions silently stop loading.
-        '';
-      };
+      adblock.enable = mkEnableOption "uBlock Origin in the Playwright browser";
 
       captchaSolver = {
         enable = mkEnableOption ''
@@ -463,11 +444,12 @@ in {
       extensions = mkOption {
         type = types.listOf types.package;
         default = [];
-        example = literalExpression "[ pkgs.my-unpacked-extension ]";
+        example = literalExpression "[ pkgs.my-unpacked-addon ]";
         description = ''
-          Additional unpacked Chromium extensions (directories containing
-          `manifest.json`) loaded into every browser session. Each is copied
-          to a private writable directory before Chromium starts.
+          Additional unpacked Firefox add-ons (directories containing
+          `manifest.json`, for example an unpacked `.xpi`) loaded into every
+          browser session as temporary add-ons, so they need no signature.
+          Each is copied to a private directory before the browser starts.
         '';
       };
 
@@ -486,19 +468,43 @@ in {
       userAgent = mkOption {
         type = types.nullOr types.str;
         default = null;
-        example = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
+        example = "Mozilla/5.0 (X11; Linux x86_64; rv:156.0) Gecko/20100101 Firefox/156.0";
         description = ''
-          Browser user agent. The default mirrors headed Chromium of the same
-          major version, instead of the `HeadlessChrome/…` token that many
-          sites reject outright.
+          Browser user agent, in the HTTP headers and in JavaScript. The
+          default is a stock Firefox on Linux of the same major version as
+          Camoufox, instead of Camoufox's own `Camoufox/…` token.
         '';
+      };
+
+      fingerprint = mkOption {
+        type = types.attrsOf configFormat.type;
+        default = {};
+        example = literalExpression ''
+          {
+            "navigator.hardwareConcurrency" = 8;
+            "locale:language" = "pl";
+            "locale:region" = "PL";
+          }
+        '';
+        description = ''
+          Camoufox fingerprint properties (see `properties.json` in the
+          Camoufox package), merged over the defaults: the user agent and a
+          1920×1080 screen with a maximized window. Unset properties keep
+          the real values of the browser.
+        '';
+      };
+
+      prefs = mkOption {
+        type = types.attrsOf configFormat.type;
+        default = {};
+        example = {"intl.accept_languages" = "pl-PL, pl, en-US, en";};
+        description = "Additional Firefox preferences (`about:config`) for every session.";
       };
 
       extraArgs = mkOption {
         type = types.listOf types.str;
         default = [];
-        example = ["--lang=pl-PL"];
-        description = "Additional Chromium command-line switches.";
+        description = "Additional Firefox command-line arguments.";
       };
     };
 
@@ -641,16 +647,16 @@ in {
         message = "programs.opencode-bwrap.playwright.captchaSolver.apiKeyFile: must be a normalized relative path under the persistent sandbox home (no empty, '.' or '..' segments)";
       }
       {
-        assertion = !(cfg.playwright.adblock.enable || cfg.playwright.captchaSolver.enable || cfg.playwright.extensions != [] || cfg.playwright.allowManifestV2) || cfg.playwright.enable;
-        message = "programs.opencode-bwrap.playwright: adblock, captchaSolver, extensions, and allowManifestV2 require playwright.enable";
+        assertion = !(cfg.playwright.adblock.enable || cfg.playwright.captchaSolver.enable || cfg.playwright.extensions != []) || cfg.playwright.enable;
+        message = "programs.opencode-bwrap.playwright: adblock, captchaSolver, and extensions require playwright.enable";
       }
       {
-        assertion = lib.all (arg: lib.hasPrefix "--" arg && !lib.hasPrefix "--user-data-dir" arg && !lib.hasPrefix "--load-extension" arg && !lib.hasPrefix "--user-agent" arg) cfg.playwright.extraArgs;
-        message = "programs.opencode-bwrap.playwright.extraArgs: entries must be `--switches`; use the dedicated options for the profile directory, extensions, and user agent";
+        assertion = !(cfg.playwright.fingerprint ? addons);
+        message = "programs.opencode-bwrap.playwright.fingerprint: `addons` is set per session from adblock, captchaSolver, and extensions";
       }
       {
-        assertion = !playwrightAllowManifestV2 || lib.all (arg: !lib.hasPrefix "--enable-features" arg) cfg.playwright.extraArgs;
-        message = "programs.opencode-bwrap.playwright.extraArgs: Chromium keeps only the last `--enable-features` switch, which would drop `AllowLegacyMV2Extensions`; leave it out when manifest v2 extensions are enabled";
+        assertion = lib.all (arg: lib.hasPrefix "-" arg && !lib.elem arg ["-profile" "--profile"]) cfg.playwright.extraArgs;
+        message = "programs.opencode-bwrap.playwright.extraArgs: entries must be `-options`; the profile directory is set per session";
       }
     ];
 

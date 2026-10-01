@@ -1,6 +1,6 @@
 # Web browsing
 
-Every opencode session and subagent has its own headless Chromium with a throwaway profile. Other agents never see your tabs, and you never see theirs.
+Every opencode session and subagent has its own headless browser (Camoufox, a Firefox fork) with a throwaway profile. Other agents never see your tabs, and you never see theirs.
 
 - The browser starts on your first browser tool call and needs about 1 GiB of memory while it runs.
 - When a browsing task is done, call `browser_close`. It closes the browser and frees the memory at once. An idle browser is also closed automatically, but much later.

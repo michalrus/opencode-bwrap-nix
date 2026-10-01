@@ -1,7 +1,7 @@
-# uBlock Origin (manifest v2) as an unpacked Chromium extension, prepared for
-# `programs.opencode-bwrap.playwright.extensions`. Current Chromium refuses
-# manifest v2 unless started with `--enable-features=AllowLegacyMV2Extensions`,
-# which only exempts unpacked extensions; `playwright.allowManifestV2` adds it.
+# uBlock Origin as an unpacked Firefox add-on, prepared for
+# `programs.opencode-bwrap.playwright.extensions`. `src` is the unpacked
+# `.xpi` from the GitHub release. Firefox still supports the full manifest v2
+# blocking API that uBlock Origin needs.
 {
   lib,
   stdenvNoCC,
@@ -24,7 +24,7 @@ stdenvNoCC.mkDerivation {
   '';
 
   meta = {
-    description = "uBlock Origin as an unpacked Chromium extension";
+    description = "uBlock Origin as an unpacked Firefox add-on";
     homepage = "https://github.com/gorhill/uBlock";
     license = lib.licenses.gpl3Only;
     platforms = lib.platforms.all;

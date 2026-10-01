@@ -26,20 +26,22 @@
       url = "github:extratone/macOSsystemsounds";
       flake = false;
     };
-    ublock-origin = {
-      url = "https://github.com/gorhill/uBlock/releases/download/1.75.0/uBlock0_1.75.0.chromium.zip";
+    # Only the version is taken from this input (see `camoufox/default.nix`).
+    # The release zips are about 1.3 GB per system, and as flake inputs
+    # `nix flake lock` would download all of them.
+    camoufox = {
+      url = "file+https://raw.githubusercontent.com/daijro/camoufox/refs/tags/v156.0.1-beta.33/README.md";
       flake = false;
     };
-    ublock-origin-lite = {
-      url = "https://github.com/uBlockOrigin/uBOL-home/releases/download/2026.926.2202/uBOLite_2026.926.2202.chromium.zip";
+    # Firefox add-ons (`.xpi`) are plain zip files; `tarball+` unpacks them.
+    ublock-origin = {
+      url = "tarball+https://github.com/gorhill/uBlock/releases/download/1.75.0/uBlock0_1.75.0.firefox.signed.xpi";
       flake = false;
     };
     twocaptcha-solver = {
-      # GitHub releases stop at 3.7.2; newer versions are only in the Chrome Web
-      # Store. This is where the update service redirects for id
-      # ifibfemgeogfhoebkmokieepdoobkbpo, version 3.7.4.
-      #url = "https://github.com/rucaptcha/2captcha-solver/releases/download/v3.7.2/2captcha-solver-chrome-3.7.2.zip";
-      url = "file+https://clients2.googleusercontent.com/crx/blobs/AZPVhcQggW9qkp9JsJTfK1mZyPEb8Wdc3YSdckG3lVJK3uhX3HFw6cZ5VDv9cy2mFd4ZUVAI8anfVcm_rkizu0WUZjGkKKfEeRrlSmbiDiQrJc7I9FJKZZvPz5Ut47okAMwAxlKa5fDvdbhzybg948P2NDdAZRNJ2D4h/IFIBFEMGEOGFHOEBKMOKIEEPDOOBKBPO_3_7_4_0.crx";
+      # The GitHub releases have Chromium builds only. This is the newest
+      # Firefox build on addons.mozilla.org (slug `2captcha-solver`).
+      url = "tarball+https://addons.mozilla.org/firefox/downloads/file/4353807/2captcha_solver-3.7.1.xpi";
       flake = false;
     };
   };
@@ -92,6 +94,7 @@
         default = opencode-bwrap;
         opencode-bwrap = builtins.head hmEval.config.home.packages;
         bwrap-escape-hatch = (pkgs.callPackage ./bwrap-escape-hatch {}).package;
+        camoufox = pkgs.callPackage ./camoufox {};
         image-generation-mcp = pkgs.callPackage ./image-generation-mcp {};
         mcp-session-mux = pkgs.callPackage ./mcp-session-mux {};
         preamble-environment = pkgs.callPackage ./preamble/environment.nix {};

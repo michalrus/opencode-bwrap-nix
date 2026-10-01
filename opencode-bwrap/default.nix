@@ -61,55 +61,74 @@ assert lib.assertMsg (playwright-mcp == null || mcp-session-mux != null) "openco
   # main session and every subagent, which would make them all fight over one
   # browser and its tabs. Our opencode patch stamps each `tools/call` with the
   # session ID, and `mcp-session-mux` routes it to a `playwright-mcp-ephemeral`
-  # child started for that session: a private Chromium with a throwaway on-disk
-  # profile, removed when the child exits. On-disk (not `--isolated` in-memory)
-  # profiles are what lets Chromium load unpacked extensions. A session's child
-  # is stopped after `sessionIdleTimeout` seconds without tool calls; the next
+  # child started for that session: a private Camoufox with a throwaway
+  # on-disk profile, removed when the child exits. A session's child is
+  # stopped after `sessionIdleTimeout` seconds without tool calls; the next
   # call starts a fresh one with no tabs.
-  playwrightFontsConf = pkgs.makeFontsConf {
-    fontDirectories = with pkgs; [
-      dejavu_fonts
-      freefont_ttf
-      gyre-fonts
-      liberation_ttf
-      unifont
-      noto-fonts-color-emoji
-    ];
-    impureFontDirectories = [];
-    includes = ["${pkgs.fontconfig.out}/etc/fonts/conf.d"];
-  };
+  camoufox = playwright.package or (pkgs.callPackage ../camoufox {});
+
+  playwrightCpu = pkgs.stdenv.hostPlatform.parsed.cpu.name;
+  playwrightFirefoxMajor = lib.versions.major camoufox.version;
 
   playwrightUserAgent =
     if playwright.userAgent or null != null
     then playwright.userAgent
-    else "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${lib.versions.major pkgs.chromium.version}.0.0.0 Safari/537.36";
+    else "Mozilla/5.0 (X11; Linux ${playwrightCpu}; rv:${playwrightFirefoxMajor}.0) Gecko/20100101 Firefox/${playwrightFirefoxMajor}.0";
+
+  # A common desktop: a 1920×1080 screen with a 40 px panel, and a maximized
+  # window whose toolbars take 85 px. The page viewport is the inner size, so
+  # it does not have Playwright's telltale default of 1280×720.
+  playwrightScreen = {
+    width = 1920;
+    height = 1080;
+    availHeight = 1040;
+    innerHeight = 955;
+  };
+
+  # Camoufox reads the fingerprint to report from `CAMOU_CONFIG`, a JSON
+  # object of the properties in its `properties.json`. Unset properties keep
+  # the real values of the browser. `playwright-mcp-ephemeral` adds the
+  # session's add-ons as `addons` at startup.
+  playwrightCamouConfig = configFormat.generate "camoufox-config.json" ({
+      "navigator.userAgent" = playwrightUserAgent;
+      "headers.User-Agent" = playwrightUserAgent;
+      "navigator.appVersion" = "5.0 (X11)";
+      "navigator.oscpu" = "Linux ${playwrightCpu}";
+      "navigator.platform" = "Linux ${playwrightCpu}";
+      "screen.width" = playwrightScreen.width;
+      "screen.height" = playwrightScreen.height;
+      "screen.availWidth" = playwrightScreen.width;
+      "screen.availHeight" = playwrightScreen.availHeight;
+      "window.outerWidth" = playwrightScreen.width;
+      "window.outerHeight" = playwrightScreen.availHeight;
+      "window.innerWidth" = playwrightScreen.width;
+      "window.innerHeight" = playwrightScreen.innerHeight;
+      "window.screenX" = 0;
+      "window.screenY" = 0;
+    }
+    // (playwright.fingerprint or {}));
 
   playwrightExtensions = playwright.extensions or [];
   playwrightExtensionEnvPlaceholders = playwright.extensionEnvPlaceholders or [];
 
-  # Chromium honours only the last `--enable-features` switch, and Playwright
-  # already passes one of its own (`CDPScreenshotNewSurface`, see
-  # `chromiumSwitches.ts`), so it has to be repeated here alongside ours.
-  # `AllowLegacyMV2Extensions` is the developer escape hatch that lets unpacked
-  # manifest v2 extensions load after the MV2 deprecation.
-  playwrightEnabledFeatures =
-    ["CDPScreenshotNewSurface"]
-    ++ lib.optional (playwright.allowManifestV2 or false) "AllowLegacyMV2Extensions";
-
   playwrightMcpConfig = configFormat.generate "playwright-mcp-config.json" {
     browser = {
-      browserName = "chromium";
+      browserName = "firefox";
       launchOptions = {
-        executablePath = lib.getExe pkgs.chromium;
+        executablePath = lib.getExe camoufox;
         headless = true;
-        chromiumSandbox = true;
-        args =
-          [
-            "--user-agent=${playwrightUserAgent}"
-          ]
-          ++ lib.optional (playwrightExtensions != []) "--load-extension=@PLAYWRIGHT_EXTENSIONS@"
-          ++ lib.optional (playwright.allowManifestV2 or false) "--enable-features=${lib.concatStringsSep "," playwrightEnabledFeatures}"
-          ++ (playwright.extraArgs or []);
+        args = playwright.extraArgs or [];
+        firefoxUserPrefs =
+          {
+            # Resolve names through the host's resolver, like the rest of the
+            # sandbox, not through DNS over HTTPS.
+            "network.trr.mode" = 5;
+          }
+          // (playwright.prefs or {});
+      };
+      contextOptions.viewport = {
+        inherit (playwrightScreen) width;
+        height = playwrightScreen.innerHeight;
       };
       userDataDir = "@PLAYWRIGHT_USER_DATA_DIR@";
     };
@@ -118,13 +137,14 @@ assert lib.assertMsg (playwright-mcp == null || mcp-session-mux != null) "openco
   playwrightMcpWrapper = pkgs.writeShellApplication {
     name = "playwright-mcp-ephemeral";
     runtimeInputs = with pkgs; [coreutils findutils gnugrep gnused jq];
-    text = ''
-      export PLAYWRIGHT_MCP=${lib.escapeShellArg (lib.getExe playwright-mcp)}
-      export PLAYWRIGHT_MCP_CONFIG=${lib.escapeShellArg "${playwrightMcpConfig}"}
-      export PLAYWRIGHT_EXTENSIONS=${lib.escapeShellArg (lib.concatMapStrings (ext: "${ext}\n") playwrightExtensions)}
-      export PLAYWRIGHT_PLACEHOLDERS=${lib.escapeShellArg (lib.concatMapStrings (var: "${var}\n") playwrightExtensionEnvPlaceholders)}
-      ${builtins.readFile ./playwright-mcp-ephemeral.sh}
-    '';
+    runtimeEnv = {
+      PLAYWRIGHT_MCP = lib.getExe playwright-mcp;
+      PLAYWRIGHT_MCP_CONFIG = "${playwrightMcpConfig}";
+      PLAYWRIGHT_CAMOU_CONFIG = "${playwrightCamouConfig}";
+      PLAYWRIGHT_EXTENSIONS = lib.concatMapStrings (ext: "${ext}\n") playwrightExtensions;
+      PLAYWRIGHT_PLACEHOLDERS = lib.concatMapStrings (var: "${var}\n") playwrightExtensionEnvPlaceholders;
+    };
+    text = builtins.readFile ./playwright-mcp-ephemeral.sh;
   };
 
   # The WebMCP bridge adds tools at runtime as pages expose them; the mux
@@ -235,10 +255,7 @@ assert lib.assertMsg (playwright-mcp == null || mcp-session-mux != null) "openco
                 "--"
               ]
               ++ playwrightMcpCommand;
-            environment = {
-              PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
-              FONTCONFIG_FILE = toString playwrightFontsConf;
-            };
+            environment.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
             enabled = true;
           };
         }
@@ -447,7 +464,7 @@ assert lib.assertMsg (playwright-mcp == null || mcp-session-mux != null) "openco
       # The host time zone, otherwise the sandbox (and every website the
       # headless browser visits) sees UTC. `TZ` and `TZDIR` are forwarded
       # below: glibc needs `TZDIR` to resolve a zone name in `TZ`, ICU (in
-      # Chromium and Node) reads `TZ` first, then falls back to this symlink.
+      # Firefox and Node) reads `TZ` first, then falls back to this symlink.
       if localtime=$(readlink -f /etc/localtime 2>/dev/null) && [ -f "$localtime" ]; then
         bwrap_opts+=( --symlink "$localtime" /etc/localtime )
       fi
@@ -633,7 +650,7 @@ assert lib.assertMsg (playwright-mcp == null || mcp-session-mux != null) "openco
       };
       passthru = {
         bwrap-escape-hatch = bwrap-escape-hatch // {inherit escapeHatchShims;};
-        inherit plugins config tuiConfig playwright-mcp mcp-session-mux playwrightMcpWrapper playwrightMcpConfig playwrightMcpManifest image-generation-mcp;
+        inherit plugins config tuiConfig playwright-mcp mcp-session-mux camoufox playwrightMcpWrapper playwrightMcpConfig playwrightCamouConfig playwrightMcpManifest image-generation-mcp;
       };
     };
   };
