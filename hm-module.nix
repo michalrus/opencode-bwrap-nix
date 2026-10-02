@@ -394,7 +394,8 @@ in {
         description = ''
           The Camoufox package. Playwright drives it through Juggler, which
           only Firefox builds patched for Playwright have; a stock Firefox does
-          not work.
+          not work. If the package has a `fontsConf` attribute, the sandbox
+          uses that file as `/etc/fonts/fonts.conf`.
         '';
       };
 

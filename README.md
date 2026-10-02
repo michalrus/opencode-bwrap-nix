@@ -12,6 +12,10 @@ with a Home Manager module for declarative installation.
   history (override with `OPENCODE_UNSAFE_RW_GIT=1`).
 - Applies a seccomp-BPF filter that blocks the `TIOCSTI` ioctl, preventing
   keystroke injection into the host terminal.
+- Provides `/etc/fonts/fonts.conf` with fonts from the Nix store and none
+  from the host. With Playwright enabled, it is the Camoufox font set;
+  otherwise, the standard NixOS desktop set (DejaVu, FreeFont, TeX Gyre,
+  Liberation, GNU Unifont, and Noto Color Emoji).
 - Provides a socket-activated **escape hatch** for operations that must run
   on the host (desktop notifications, sound playback), gated by an
   fnmatch allow-list. See [`bwrap-escape-hatch/README.md`](bwrap-escape-hatch/README.md).

@@ -113,7 +113,7 @@
     zlib
   ];
 in
-  stdenv.mkDerivation {
+  stdenv.mkDerivation (finalAttrs: {
     pname = "camoufox";
     inherit version;
 
@@ -168,6 +168,8 @@ in
       runHook postInstall
     '';
 
+    passthru.fontsConf = "${finalAttrs.finalPackage}/lib/camoufox/fonts.conf";
+
     meta = {
       description = "Firefox build with fingerprint spoofing, driven by Playwright";
       homepage = "https://github.com/daijro/camoufox";
@@ -176,4 +178,4 @@ in
       platforms = builtins.attrNames releases;
       mainProgram = "camoufox";
     };
-  }
+  })

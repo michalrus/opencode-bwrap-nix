@@ -67,6 +67,27 @@ assert lib.assertMsg (playwright-mcp == null || mcp-session-mux != null) "openco
   # call starts a fresh one with no tabs.
   camoufox = playwright.package or (pkgs.callPackage ../camoufox {});
 
+  # `/etc/fonts/fonts.conf` of the sandbox, for every Fontconfig program (Wine,
+  # Matplotlib, …), never the host's fonts. With Playwright, it is the
+  # Camoufox set, so the sandbox renders the fonts the browser reports. Without
+  # it, the standard NixOS desktop set from Nixpkgs.
+  sandboxFontsConf =
+    if playwright-mcp != null && camoufox ? fontsConf
+    then camoufox.fontsConf
+    else
+      pkgs.makeFontsConf {
+        fontDirectories = with pkgs; [
+          dejavu_fonts
+          freefont_ttf
+          gyre-fonts
+          liberation_ttf
+          unifont
+          noto-fonts-color-emoji
+        ];
+        impureFontDirectories = [];
+        includes = ["${pkgs.fontconfig.out}/etc/fonts/conf.d"];
+      };
+
   playwrightCpu = pkgs.stdenv.hostPlatform.parsed.cpu.name;
   playwrightFirefoxMajor = lib.versions.major camoufox.version;
 
@@ -420,6 +441,7 @@ assert lib.assertMsg (playwright-mcp == null || mcp-session-mux != null) "openco
         --setenv XDG_RUNTIME_DIR /run/user/"$UID"
         --tmpfs "$HOME"
         --ro-bind ${pkgs.writeText "etc-hosts" "127.0.0.1 localhost\n"} /etc/hosts
+        --ro-bind ${sandboxFontsConf} /etc/fonts/fonts.conf
         --ro-bind "$etc_passwd" /etc/passwd
         --ro-bind "$etc_group" /etc/group
         --ro-bind ${bashrc} /etc/bashrc
