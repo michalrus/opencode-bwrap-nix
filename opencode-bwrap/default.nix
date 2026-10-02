@@ -303,16 +303,31 @@ assert lib.assertMsg (playwright-mcp == null || mcp-session-mux != null) "openco
         ["${preamblePath}"]
         ++ lib.optional (playwright-mcp != null) "${./playwright-instructions.md}"
         ++ lib.optional (playwright-mcp != null && (playwright.captchaSolverEnabled or false)) "${../playwright-extensions/captcha-solver-instructions.md}";
-      # We're running in a strict sandbox, so let's relax the default permissions.
-      # Set at top level so all agents (build, plan, custom) inherit them.
+      # The sandbox already limits what the agent can reach, so allow what
+      # upstream would ask about. Do not allow `"*"`: these rules come last in
+      # every agent's ruleset, so a wildcard would undo the agents' own denies
+      # (`question` for subagents, read-only `explore`, no edits in `plan`).
       permission = {
-        "*" = "allow";
+        bash = "allow";
+        external_directory = "allow";
         lsp =
           if serena != null
           then "deny" # we have a better serena for this
           else "allow";
         doom_loop = "deny";
       };
+      # `explore` denies everything that it does not allow by name, MCP tools
+      # included. Give it the read-only Serena tools, and Playwright, which
+      # runs a separate throwaway browser for each session.
+      agent.explore.permission =
+        lib.optionalAttrs (serena != null) {
+          "serena_activate_project" = "allow";
+          "serena_find_*" = "allow";
+          "serena_get_*" = "allow";
+        }
+        // lib.optionalAttrs (playwright-mcp != null) {
+          "playwright_*" = "allow";
+        };
     }
   ];
 
