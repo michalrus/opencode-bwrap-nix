@@ -1,0 +1,11 @@
+--- a/packages/tui/src/routes/session/subagent-footer.tsx
++++ b/packages/tui/src/routes/session/subagent-footer.tsx
+@@ -17,7 +17,7 @@
+   const subagentInfo = createMemo(() => {
+     const s = session()
+     if (!s) return { label: "Subagent", index: 0, total: 0 }
+-    const agentMatch = s.title.match(/@(\w+) subagent/)
++    const agentMatch = s.title.match(/@(\S+) subagent/)
+     const label = agentMatch ? Locale.titlecase(agentMatch[1]) : "Subagent"
+ 
+     if (!s.parentID) return { label, index: 0, total: 0 }

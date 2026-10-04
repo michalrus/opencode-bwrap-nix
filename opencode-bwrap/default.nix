@@ -41,6 +41,10 @@ assert lib.assertMsg (playwright-mcp == null || mcp-session-mux != null) "openco
         ./opencode--max-context-tokens.patch
         ./opencode--disable-paste-attachments.patch
         ./opencode--mcp-session-meta.patch
+        # The subagent footer reads the agent name back out of the session
+        # title with `\w+`, so a name with a dash, like `IQ-Medium-RO`, falls
+        # back to a generic "Subagent".
+        ./opencode--subagent-footer-label.patch
       ];
   });
 
